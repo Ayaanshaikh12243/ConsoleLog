@@ -188,19 +188,6 @@ const Dashboard = ({ cell, onClose }) => {
           />
         </div>
 
-        {/* AI Analysis Brief */}
-        <div className="p-5 rounded-2xl bg-white/5 border border-white/10 relative overflow-hidden group hover:border-stratum-accent/50 transition-all duration-500">
-            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-30 transition-opacity">
-                <TrendingUp className="w-12 h-12 text-stratum-accent" />
-            </div>
-            <h3 className="text-[10px] font-black text-stratum-accent uppercase tracking-[0.2em] mb-3 flex items-center">
-                <div className="w-1.5 h-1.5 bg-stratum-accent rounded-full animate-ping mr-2"></div>
-                STRATUM CORTEX — Intelligence Analysis
-            </h3>
-            <p className="text-[13px] text-white/90 leading-relaxed font-medium">
-                {cell.prediction || cell.ai_report || "Establishing neural handshake with Featherless LLM..."}
-            </p>
-        </div>
 
         {/* Dynamic Chart */}
         <div className="pt-6 border-t border-white/5">
@@ -305,37 +292,6 @@ const Dashboard = ({ cell, onClose }) => {
             )}
         </div>
 
-        {/* Live Agent Logs */}
-        <div className="space-y-4 pt-6 border-t border-white/5 mb-6">
-          <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] mb-4">CORTEX Intelligence Chain</h3>
-          {loading ? (
-             <div className="space-y-3">
-                {[1,2,3].map(i => <div key={i} className="h-10 bg-white/5 animate-pulse rounded-lg"></div>)}
-             </div>
-          ) : (
-            <div className="space-y-4">
-                {Array.isArray(logs) && logs.length > 0 ? logs.map((log, i) => (
-                    <motion.div 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.1 }}
-                        key={i} 
-                        className="flex space-x-4 group"
-                    >
-                        <div className={`w-0.5 h-10 rounded-full transition-all duration-500 group-hover:h-12 ${
-                            log?.type === 'error' ? 'bg-risk-high' : log?.type === 'warning' ? 'bg-risk-medium' : 'bg-risk-low'
-                        }`}></div>
-                        <div>
-                            <p className="text-[9px] font-black text-white/30 uppercase tracking-widest">{log?.agent || 'SYSTEM'}</p>
-                            <p className="text-[11px] text-white/70 leading-relaxed font-medium">{log?.message || 'Synchronizing node data...'}</p>
-                        </div>
-                    </motion.div>
-                )) : (
-                  <p className="text-[11px] text-white/20 italic">No autonomous traces in current buffer.</p>
-                )}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Footer Actions */}
