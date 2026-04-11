@@ -16,8 +16,10 @@ from .services.database import (
     upsert_cell, save_scan_point, get_cell_history_from_db,
     save_upload, get_recent_uploads, get_all_cells_summary
 )
+from .routers import citizen_submissions
 
 app = FastAPI(title="STRATUM — Autonomous Planetary Intelligence")
+app.include_router(citizen_submissions.router)
 
 app.add_middleware(
     CORSMiddleware,

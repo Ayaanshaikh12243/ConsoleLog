@@ -19,4 +19,5 @@ statsmodels
 prophet
 h3
 python-multipart
+aiofiles
 websockets

@@ -23,7 +23,7 @@ const Sidebar = () => {
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
     { icon: Cpu, label: 'Agents', path: '/agents' },
     { icon: FileText, label: 'Reports', path: '/reports' },
-    { icon: Upload, label: 'Uploads', path: '/uploads' },
+    { icon: Upload, label: 'Submissions', path: '/submissions' },
     { icon: Database, label: 'History', path: '/history' },
     { icon: Settings, label: 'Settings', path: '/settings' },
   ];

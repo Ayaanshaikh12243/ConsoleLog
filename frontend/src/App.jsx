@@ -9,6 +9,7 @@ import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import HistoryPage from './pages/HistoryPage';
 import UploadsPage from './pages/UploadsPage';
+import SubmissionDashboard from './components/SubmissionDashboard';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
               <Route path="/uploads" element={<UploadsPage />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/submissions" element={<SubmissionDashboard />} />
             </Routes>
           </main>
         </div>
