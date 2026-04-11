@@ -76,66 +76,6 @@ const MapPage = () => {
         scannedCells={scannedCells}
       />
 
-      {/* ── Scan Toggle Button ── */}
-      <div className="absolute top-6 left-6 z-20 flex flex-col space-y-3">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => { setScanActive(s => !s); if (!scanActive) setScannedCells([]); }}
-          className={`flex items-center space-x-3 px-5 py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all shadow-xl ${scanActive
-              ? 'bg-stratum-accent text-black shadow-[0_0_20px_rgba(0,242,255,0.4)]'
-              : 'glass-panel text-white/60 hover:text-white border border-white/10'
-            }`}
-        >
-          {scanActive ? (
-            <><Radio className="w-4 h-4 animate-pulse" /><span>Scanning Active</span></>
-          ) : (
-            <><ScanLine className="w-4 h-4" /><span>Auto Scan</span></>
-          )}
-        </motion.button>
-
-        {/* Scan stats */}
-        <AnimatePresence>
-          {scanActive && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="glass-panel px-4 py-2 rounded-xl border border-white/10 space-y-1"
-            >
-              <div className="flex items-center space-x-2">
-                <div className="w-1.5 h-1.5 bg-stratum-accent rounded-full animate-ping" />
-                <span className="text-[9px] font-black text-stratum-accent uppercase tracking-widest">
-                  {scannedCells.length} cells scanned
-                </span>
-              </div>
-              <div className="text-[9px] text-white/30 font-bold">
-                Scan #{scanCount} • 15s interval
-              </div>
-              {/* Risk breakdown */}
-              {scannedCells.length > 0 && (
-                <div className="flex space-x-3 mt-1 pt-1 border-t border-white/5">
-                  <span className="text-[8px] text-risk-high font-bold">
-                    🔴 {scannedCells.filter(c => c.risk > 70).length} CRIT
-                  </span>
-                  <span className="text-[8px] text-risk-medium font-bold">
-                    🟡 {scannedCells.filter(c => c.risk > 35 && c.risk <= 70).length} WARN
-                  </span>
-                  <span className="text-[8px] text-risk-low font-bold">
-                    🟢 {scannedCells.filter(c => c.risk <= 35).length} OK
-                  </span>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Global scan status */}
-        <div className="glass-panel px-4 py-2 rounded-xl flex items-center space-x-3 border border-white/5">
-          <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Global Scan:</span>
-          <span className="text-xs font-mono text-stratum-accent">ACTIVE</span>
-        </div>
-      </div>
 
       {/* ── Click hint ── */}
       <AnimatePresence>
@@ -146,9 +86,9 @@ const MapPage = () => {
             exit={{ opacity: 0 }}
             className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
           >
-            <div className="glass-panel px-6 py-3 rounded-2xl animate-bounce">
-              <p className="text-[10px] font-bold tracking-widest text-white/60">
-                CLICK MAP TO INTERROGATE CELL — OR ENABLE AUTO SCAN
+            <div className="glass-panel px-8 py-4 rounded-full shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10">
+              <p className="text-[11px] font-black tracking-[0.3em] text-white/40 uppercase whitespace-nowrap">
+                CLICK MAP TO INTERROGATE CELL
               </p>
             </div>
           </motion.div>
