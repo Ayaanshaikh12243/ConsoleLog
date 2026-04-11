@@ -21,7 +21,6 @@ const Sidebar = () => {
   const menuItems = [
     { icon: Globe, label: 'Map', path: '/' },
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
-    { icon: Cpu, label: 'Agents', path: '/agents' },
     { icon: FileText, label: 'Reports', path: '/reports' },
     { icon: Upload, label: 'Submissions', path: '/submissions' },
     { icon: Database, label: 'History', path: '/history' },
