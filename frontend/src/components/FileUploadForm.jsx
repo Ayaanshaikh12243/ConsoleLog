@@ -297,37 +297,43 @@ const FileUploadForm = ({ type, onUpload, isLoading, result }) => {
             )}
 
             {/* Disaster Classification (Flask model) */}
+            {/* Disaster Classification (Flask model) - PIXEL PERFECT REFERENCE MATCH */}
             {result.disaster_classification && result.disaster_classification.prediction && (
-              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-[#ff6b6b]">
-                <h4 className="text-[#ff6b6b] text-base font-bold mb-3">🌪️ Disaster Classification</h4>
-                <div className="flex items-center gap-4 mb-4 p-3 bg-[#ff6b6b]/5 rounded-lg">
-                  <span className="text-3xl">
-                    {result.disaster_classification.prediction === 'cyclone' ? '🌀' :
-                     result.disaster_classification.prediction === 'earthquake' ? '🏚️' :
-                     result.disaster_classification.prediction === 'flood' ? '🌊' :
-                     result.disaster_classification.prediction === 'wildfire' ? '🔥' : '⚠️'}
-                  </span>
-                  <div>
-                    <p className="text-white font-bold text-lg uppercase tracking-wider">{result.disaster_classification.prediction}</p>
-                    <p className="text-[#ff6b6b] text-sm font-bold">{result.disaster_classification.confidence?.toFixed(1)}% confidence</p>
+              <div className="mb-6 bg-white p-8 border border-gray-200 shadow-sm font-mono text-black">
+                {/* Header: Predicted: [TYPE] | Confidence: [VALUE]% */}
+                <h3 className="text-center text-lg font-bold mb-6">
+                  Predicted: {result.disaster_classification.prediction.toUpperCase()} | Confidence: {result.disaster_classification.confidence?.toFixed(1)}%
+                </h3>
+
+                {/* Primary analyzed image display */}
+                {preview && (
+                  <div className="flex justify-center mb-10">
+                    <img 
+                      src={preview} 
+                      alt="Disaster Analysis" 
+                      className="max-w-full h-auto"
+                    />
                   </div>
-                </div>
-                {result.disaster_classification.all_probabilities && Object.keys(result.disaster_classification.all_probabilities).length > 0 && (
-                  <div className="space-y-2">
-                    {Object.entries(result.disaster_classification.all_probabilities).map(([cls, prob]) => (
-                      <div key={cls} className="flex items-center gap-3">
-                        <span className="text-[#888] text-xs w-20 capitalize">{cls}</span>
-                        <div className="flex-1 h-2 bg-black/50 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-[#ff6b6b] to-[#ffa500] transition-all duration-500"
+                )}
+
+                {/* Probabilities list with scientific bar charts */}
+                <div className="max-w-md mx-auto">
+                  <p className="mb-4">--- All probabilities ---</p>
+                  <div className="space-y-1">
+                    {Object.entries(result.disaster_classification.all_probabilities || {}).map(([cls, prob]) => (
+                      <div key={cls} className="flex items-center gap-4">
+                        <span className="w-24 text-left">{cls}</span>
+                        <div className="flex-1 h-5 bg-[#222] relative">
+                          <div 
+                            className="h-full bg-[#444] border-r border-[#666]"
                             style={{ width: `${prob}%` }}
                           />
                         </div>
-                        <span className="text-white text-xs font-bold w-12 text-right">{prob}%</span>
+                        <span className="w-16 text-right font-bold">{prob.toFixed(1)}%</span>
                       </div>
                     ))}
                   </div>
-                )}
+                </div>
               </div>
             )}
 

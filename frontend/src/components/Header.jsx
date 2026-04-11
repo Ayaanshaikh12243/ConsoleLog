@@ -36,11 +36,11 @@ const Header = () => {
         </div>
       </div>
 
-      <nav className="hidden lg:flex items-center space-x-10 text-[10px] font-black uppercase tracking-widest text-white/40">
+      <nav className="hidden md:flex items-center space-x-10 text-[10px] font-black uppercase tracking-widest text-white/40">
         <NavLink to="/" className={({ isActive }) => isActive ? "text-stratum-accent border-b-2 border-stratum-accent pb-1" : "hover:text-white transition-colors duration-300"}>Real-time Map</NavLink>
         <NavLink to="/analytics" className={({ isActive }) => isActive ? "text-stratum-accent border-b-2 border-stratum-accent pb-1" : "hover:text-white transition-colors duration-300"}>Risk Analytics</NavLink>
         <NavLink to="/agents" className={({ isActive }) => isActive ? "text-stratum-accent border-b-2 border-stratum-accent pb-1" : "hover:text-white transition-colors duration-300"}>Agent Fleet</NavLink>
-        <NavLink to="/deploy" className={({ isActive }) => isActive ? "text-stratum-accent border-b-2 border-stratum-accent pb-1" : "hover:text-white transition-colors duration-300"}>Deployment</NavLink>
+        <NavLink to="/submissions" className={({ isActive }) => isActive ? "text-stratum-accent border-b-2 border-stratum-accent pb-1" : "hover:text-white transition-colors duration-300"}>Submissions</NavLink>
       </nav>
 
       <div className="flex items-center space-x-6">

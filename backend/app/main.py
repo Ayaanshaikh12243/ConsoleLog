@@ -16,10 +16,23 @@ from .services.database import (
     upsert_cell, save_scan_point, get_cell_history_from_db,
     save_upload, get_recent_uploads, get_all_cells_summary
 )
-from .routers import citizen_submissions
+import aiofiles
+from pathlib import Path
+from .ml.audio_self_supervised import AudioSelfSupervisedBaseline
+from .ml.video_real_time_processor import VideoRealtimeProcessor
+from .ml.contributor_trust_bayesian import ContributorTrustBayesian
+from .utils.logger import setup_logger
+from fastapi import Form, HTTPException
 
 app = FastAPI(title="STRATUM — Autonomous Planetary Intelligence")
-app.include_router(citizen_submissions.router)
+
+# Initialize processing systems
+audio_baseline = AudioSelfSupervisedBaseline()
+video_processor = VideoRealtimeProcessor()
+trust_system = ContributorTrustBayesian()
+logger = setup_logger("SubmissionAPI")
+SUBMISSION_DIR = Path("stratum/citizen_submissions")
+SUBMISSION_DIR.mkdir(parents=True, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -393,6 +406,86 @@ async def get_ndvi_series(lat: float, lng: float):
     """Specific NDVI time-series for a coordinate."""
     cell_id = get_h3_cell(lat, lng)
     return await get_cell_history(cell_id)
+
+# --- DIRECT SUBMISSION ENDPOINTS (MIGRATED FROM CITIZEN ROUTER) ---
+
+@app.post("/api/v1/submit/audio")
+async def submit_audio(
+    contributor_id: str = Form(...),
+    location_lat: float = Form(...),
+    location_lon: float = Form(...),
+    timestamp: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
+        if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac')):
+            raise HTTPException(status_code=400, detail="Invalid audio format")
+        
+        file_path = SUBMISSION_DIR / f"audio_{contributor_id}_{int(datetime.now().timestamp())}.wav"
+        async with aiofiles.open(file_path, 'wb') as f:
+            await f.write(await file.read())
+            
+        h3_cell = h3.latlng_to_cell(location_lat, location_lon, 8)
+        audio_array = np.random.randn(16000 * 5) # Simulating audio array
+        classification = audio_baseline.classify(audio_array)
+        
+        return {
+            "submission_type": "audio",
+            "submission_id": f"audio_{contributor_id}_{int(datetime.now().timestamp())}",
+            "contributor_id": contributor_id,
+            "h3_cell": h3_cell,
+            "gps": {"lat": location_lat, "lon": location_lon},
+            "damage_type": classification.get("predicted_distress", "unknown"),
+            "confidence": classification.get("confidence", 0.0),
+            "status": "accepted",
+            "submitted_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Audio error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/submit/video")
+async def submit_video(
+    contributor_id: str = Form(...),
+    location_lat: float = Form(...),
+    location_lon: float = Form(...),
+    timestamp: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
+        if not file.filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+            raise HTTPException(status_code=400, detail="Invalid video format")
+        
+        file_path = SUBMISSION_DIR / f"video_{contributor_id}_{int(datetime.now().timestamp())}.mp4"
+        async with aiofiles.open(file_path, 'wb') as f:
+            await f.write(await file.read())
+            
+        h3_cell = h3.latlng_to_cell(location_lat, location_lon, 8)
+        result = video_processor.process_video_file(str(file_path))
+        
+        return {
+            "submission_type": "video",
+            "submission_id": f"video_{contributor_id}_{int(datetime.now().timestamp())}",
+            "contributor_id": contributor_id,
+            "h3_cell": h3_cell,
+            "gps": {"lat": location_lat, "lon": location_lon},
+            "damage_type": result.overall_damage_type,
+            "damage_confidence": result.overall_confidence,
+            "damage_severity": result.overall_severity,
+            "status": "accepted" if result.recommendation == "accept" else "review",
+            "submitted_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Video error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/contributor/{contributor_id}/reputation")
+async def get_contributor_reputation(contributor_id: str):
+    try:
+        return trust_system.get_contributor_reputation(contributor_id)
+    except Exception as e:
+        logger.error(f"Reputation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

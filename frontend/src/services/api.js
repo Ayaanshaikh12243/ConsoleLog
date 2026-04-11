@@ -10,8 +10,15 @@ const apiClient = axios.create({
 });
 
 export const submitPhoto = async (formData) => {
-  const response = await apiClient.post('/submit/photo', formData);
-  return response.data;
+  // Direct call to Flask disaster service on port 5000
+  const response = await axios.post('http://localhost:5000/predict', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  // Wrap in disaster_classification key to match the UI's expectations
+  return {
+    status: 'accepted',
+    disaster_classification: response.data
+  };
 };
 
 export const submitVideo = async (formData) => {
