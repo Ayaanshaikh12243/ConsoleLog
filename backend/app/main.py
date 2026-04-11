@@ -9,6 +9,7 @@ import os
 from collections import defaultdict
 import httpx
 import math
+import json
 
 from .services.data_sources import DataSourceService
 from .services.intelligence import IntelligenceService
@@ -33,6 +34,8 @@ trust_system = ContributorTrustBayesian()
 logger = setup_logger("SubmissionAPI")
 SUBMISSION_DIR = Path("stratum/citizen_submissions")
 SUBMISSION_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR = Path("stratum/reports")
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
@@ -361,13 +364,46 @@ async def get_uploads_history():
 
 @app.get("/api/reports")
 async def get_reports():
-    return [
-        {
-            "id": "R-1",
-            "name": f"Daily Intelligence Brief — {datetime.now().strftime('%d/%m/%Y')}",
-            "date": datetime.now().strftime("%Y-%m-%d")
-        }
-    ]
+    """List all AI reports from storage."""
+    reports = []
+    if REPORTS_DIR.exists():
+        for file in REPORTS_DIR.glob("*.json"):
+            try:
+                async with aiofiles.open(file, 'r') as f:
+                    data = json.loads(await f.read())
+                    reports.append({
+                        "id": file.stem,
+                        "name": f"{data.get('disaster_type', 'Report').upper()} — {data.get('affected_area', 'Sector Unknown')}",
+                        "date": data.get("generated_at", "").split("T")[0],
+                        "severity": data.get("severity", "unknown")
+                    })
+            except Exception as e:
+                logger.error(f"Error reading report {file}: {e}")
+    
+    # Sort by date descending
+    reports.sort(key=lambda x: x['date'], reverse=True)
+    return reports
+
+@app.post("/api/reports")
+async def save_report(report_data: dict):
+    """Save an AI generated report."""
+    report_id = f"R-{int(datetime.now().timestamp())}"
+    file_path = REPORTS_DIR / f"{report_id}.json"
+    
+    async with aiofiles.open(file_path, 'w') as f:
+        await f.write(json.dumps(report_data, indent=4))
+        
+    return {"status": "archived", "report_id": report_id}
+
+@app.get("/api/reports/{report_id}")
+async def get_report_detail(report_id: str):
+    """Fetch full report JSON."""
+    file_path = REPORTS_DIR / f"{report_id}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    async with aiofiles.open(file_path, 'r') as f:
+        return json.loads(await f.read())
 
 # ── DYNAMIC ANALYTICS ENDPOINTS ─────────────────────────────────────────────
 

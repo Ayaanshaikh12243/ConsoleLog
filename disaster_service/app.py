@@ -11,9 +11,17 @@ import google.generativeai as genai
 import pathlib
 import json
 from datetime import datetime
+from dotenv import load_dotenv
 
 # --- CONFIG ---
-GEMINI_API_KEY = "AIzaSyAyjf2KQbcnlHIK5QBYCdq42H5gOsxgT28"
+# Load .env from backend directory (parent of disaster_service or same root)
+env_path = os.path.join(os.path.dirname(__file__), '..', 'backend', '.env')
+load_dotenv(dotenv_path=env_path)
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    print("WARNING: GEMINI_API_KEY not found in .env")
+
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-pro")
 

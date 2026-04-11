@@ -62,6 +62,28 @@ const ReportsPage = () => {
     }
   };
 
+  const handleSaveReport = async () => {
+    if (!analysisResult) return;
+    try {
+      await axios.post('http://localhost:8000/api/reports', analysisResult);
+      fetchReports();
+      alert('SENTINEL Intelligence Deployed to Archive.');
+    } catch (e) {
+      console.error('Save failed:', e);
+      alert('Deployment Failed: Backend persistence error.');
+    }
+  };
+
+  const handleViewReport = async (reportId) => {
+    try {
+      const res = await axios.get(`http://localhost:8000/api/reports/${reportId}`);
+      setAnalysisResult(res.data);
+      // Optional: Scroll to top of analyzer on load
+    } catch (e) {
+      console.error('Fetch failed:', e);
+    }
+  };
+
   const severityColors = {
     low: 'text-green-400',
     medium: 'text-yellow-400',
@@ -159,13 +181,20 @@ const ReportsPage = () => {
               {loading ? (
                 <div className="h-20 animate-pulse glass-panel rounded-2xl opacity-50"></div>
               ) : (
-                reports.slice(0, 3).map(report => (
-                  <div key={report.id} className="p-4 glass-panel rounded-2xl flex items-center justify-between group hover:bg-white/5 cursor-pointer">
+                reports.slice(0, 5).map(report => (
+                  <div 
+                    key={report.id} 
+                    onClick={() => handleViewReport(report.id)}
+                    className="p-4 glass-panel rounded-2xl flex items-center justify-between group hover:bg-white/5 cursor-pointer transition-all border-l-2 border-transparent hover:border-stratum-accent"
+                  >
                     <div className="flex items-center gap-4">
-                      <FileText className="w-4 h-4 text-white/20 group-hover:text-stratum-accent" />
-                      <span className="text-xs font-bold text-white/60">{report.name}</span>
+                      <div className={`w-2 h-2 rounded-full ${report.severity === 'critical' ? 'bg-purple-400' : report.severity === 'high' ? 'bg-red-400' : 'bg-white/20'}`} />
+                      <div>
+                        <p className="text-[10px] font-bold text-white group-hover:text-stratum-accent transition-colors">{report.name}</p>
+                        <p className="text-[8px] text-white/30 uppercase">{report.date}</p>
+                      </div>
                     </div>
-                    <Download className="w-4 h-4 text-white/10 group-hover:text-white" />
+                    <Search className="w-3 h-3 text-white/10 group-hover:text-white" />
                   </div>
                 ))
               )}
@@ -188,8 +217,16 @@ const ReportsPage = () => {
                       <h2 className="text-2xl font-black tracking-tighter">SENTINEL-GEMINI ANALYSIS v4.0</h2>
                       <p className="text-[10px] mt-1">GENERATED: {analysisResult.generated_at}</p>
                     </div>
-                    <div className={`px-4 py-1 border-2 border-black font-black text-sm uppercase ${severityColors[analysisResult.severity]}`}>
-                      {analysisResult.severity}
+                    <div className="flex gap-4 items-center">
+                      <button 
+                        onClick={handleSaveReport}
+                        className="px-4 py-1 bg-black text-white font-bold text-[10px] uppercase hover:bg-stratum-accent hover:text-black transition-colors"
+                      >
+                        [ DEPLOY TO ARCHIVE ]
+                      </button>
+                      <div className={`px-4 py-1 border-2 border-black font-black text-sm uppercase ${severityColors[analysisResult.severity]}`}>
+                        {analysisResult.severity}
+                      </div>
                     </div>
                   </div>
 
