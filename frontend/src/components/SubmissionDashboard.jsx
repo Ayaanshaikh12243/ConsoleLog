@@ -6,10 +6,15 @@ import {
   Mic, 
   LayoutDashboard, 
   History,
-  Info
+  Info,
+  Loader2,
+  Shield,
+  Zap
 } from 'lucide-react';
 import FileUploadForm from './FileUploadForm';
 import ContributorStats from './ContributorStats';
+import NodeGovernance from './NodeGovernance';
+import SystemLogs from './SystemLogs';
 import { submitPhoto, submitVideo, submitAudio, getContributorReputation } from '../services/api';
 
 const SubmissionDashboard = () => {
@@ -132,27 +137,46 @@ const SubmissionDashboard = () => {
                        3. <span className="text-white/80">Process Time:</span> Audio/Video analysis may take up to 2,000ms per node cycle.
                      </p>
                    </div>
+                   {/* Integrated Results Display */}
+                   <AnimatePresence>
+                     {result && (
+                       <motion.div 
+                         initial={{ opacity: 0, y: 10 }}
+                         animate={{ opacity: 1, y: 0 }}
+                         exit={{ opacity: 0 }}
+                         className="mt-6 pt-6 border-t border-white/5 space-y-4"
+                       >
+                         <div className={`p-4 rounded-2xl glass-panel border-l-2 ${result.status === 'accepted' || result.status === 'PROCESSED' ? 'border-risk-low' : 'border-risk-high'}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[9px] font-black uppercase text-white/30 tracking-widest">Inference Code</span>
+                              <Zap className="w-3 h-3 text-stratum-accent" />
+                            </div>
+                            <p className="text-sm font-black text-white uppercase tracking-tighter">
+                              {result.status || 'PROCESSED'}
+                            </p>
+                         </div>
+
+                         {(result.prediction || result.analysis) && (
+                           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10">
+                             <p className="text-[10px] text-white/60 leading-relaxed italic">
+                               "{result.analysis || result.prediction}"
+                             </p>
+                           </div>
+                         )}
+                       </motion.div>
+                     )}
+                   </AnimatePresence>
                  </div>
 
-                 {result && (
-                   <motion.div 
-                     initial={{ opacity: 0, y: 10 }}
-                     animate={{ opacity: 1, y: 0 }}
-                     className="p-6 rounded-3xl bg-stratum-accent/5 border border-stratum-accent/10"
-                   >
-                     <p className="text-[10px] font-black text-stratum-accent uppercase tracking-widest mb-2">System Broadcast</p>
-                     <p className="text-xs font-medium text-white/60 italic leading-relaxed">
-                       "Submission {result.submission_id} has been ingested and mapped to H3 cell {result.h3_cell}. Node trust updated."
-                     </p>
-                   </motion.div>
-                 )}
-               </div>
+                  <SystemLogs />
+                </div>
             </div>
           </div>
 
-          {/* Right Sidebar: Stats */}
-          <div className="lg:col-span-4 h-fit sticky top-0">
+          {/* Right Sidebar: Stats & Governance */}
+          <div className="lg:col-span-4 h-fit sticky top-0 space-y-8">
             <ContributorStats stats={stats} />
+            <NodeGovernance />
           </div>
         </div>
       </div>
