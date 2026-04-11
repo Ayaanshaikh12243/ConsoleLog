@@ -15,7 +15,7 @@ import FileUploadForm from './FileUploadForm';
 import ContributorStats from './ContributorStats';
 import NodeGovernance from './NodeGovernance';
 import SystemLogs from './SystemLogs';
-import { submitPhoto, submitVideo, submitAudio, getContributorReputation } from '../services/api';
+import { predictDisaster, submitVideo, submitAudio, getContributorReputation } from '../services/api';
 
 const SubmissionDashboard = () => {
   const [activeTab, setActiveTab] = useState('photo');
@@ -42,7 +42,7 @@ const SubmissionDashboard = () => {
     setResult(null);
     try {
       let data;
-      if (activeTab === 'photo') data = await submitPhoto(formData);
+      if (activeTab === 'photo') data = await predictDisaster(formData);
       else if (activeTab === 'video') data = await submitVideo(formData);
       else data = await submitAudio(formData);
       

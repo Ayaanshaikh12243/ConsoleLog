@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import * as api from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FileText, 
@@ -29,8 +29,8 @@ const ReportsPage = () => {
 
   const fetchReports = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/api/reports');
-      setReports(res.data);
+      const data = await api.getReports();
+      setReports(data);
     } catch (e) {
       console.error(e);
     } finally {
@@ -44,16 +44,16 @@ const ReportsPage = () => {
     setAnalysisResult(null);
 
     try {
-      let response;
+      let data;
       if (selectedFile) {
         const formData = new FormData();
         formData.append('file', selectedFile);
         formData.append('report_text', reportText);
-        response = await axios.post('http://localhost:5000/analyze-document', formData);
+        data = await api.analyzeReportDocument(formData);
       } else {
-        response = await axios.post('http://localhost:5000/analyze-report', { report_text: reportText });
+        data = await api.analyzeReportText(reportText);
       }
-      setAnalysisResult(response.data);
+      setAnalysisResult(data);
     } catch (e) {
       console.error('Analysis failed:', e);
       alert('SENTINEL Analysis Failed: Could not connect to Gemini reasoning engine.');
@@ -65,7 +65,7 @@ const ReportsPage = () => {
   const handleSaveReport = async () => {
     if (!analysisResult) return;
     try {
-      await axios.post('http://localhost:8000/api/reports', analysisResult);
+      await api.saveReport(analysisResult);
       fetchReports();
       alert('SENTINEL Intelligence Deployed to Archive.');
     } catch (e) {
@@ -76,9 +76,8 @@ const ReportsPage = () => {
 
   const handleViewReport = async (reportId) => {
     try {
-      const res = await axios.get(`http://localhost:8000/api/reports/${reportId}`);
-      setAnalysisResult(res.data);
-      // Optional: Scroll to top of analyzer on load
+      const data = await api.getReportDetail(reportId);
+      setAnalysisResult(data);
     } catch (e) {
       console.error('Fetch failed:', e);
     }

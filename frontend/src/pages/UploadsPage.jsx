@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Shield, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, Cpu, Trash2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:8000/api';
+import * as api from '../services/api';
 
 const RISK_COLOR = (text = '') => {
   const t = text.toLowerCase();
@@ -26,8 +24,8 @@ const UploadsPage = () => {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/uploads/history`);
-      setHistory(res.data || []);
+      const data = await api.getHistory();
+      setHistory(data || []);
     } catch (e) {
       console.error('History fetch failed:', e);
     } finally {
@@ -56,13 +54,11 @@ const UploadsPage = () => {
     }, 400);
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/analyze-upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const data = await api.analyzeUpload(formData);
       clearInterval(progressInterval);
       setUploadProgress(100);
       setTimeout(() => {
-        setResult(res.data);
+        setResult(data);
         setUploadProgress(0);
         setUploading(false);
         fetchHistory(); // refresh history from MongoDB
