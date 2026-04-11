@@ -7,7 +7,7 @@ load_dotenv()
 FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY")
 FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"
 
-async def call_featherless_llm(prompt: str, model: str = "meta-llama/Llama-3-70b-Instruct"):
+async def call_featherless_llm(prompt: str, model: str = "Qwen/Qwen2.5-32B-Instruct"):
     headers = {
         "Authorization": f"Bearer {FEATHERLESS_API_KEY}",
         "Content-Type": "application/json"

@@ -236,41 +236,7 @@ const AnalyticsPage = () => {
                 </div>
             </div>
 
-            {/* ── Footer Stats Row ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch pt-4">
-                <div className="glass-panel p-10 rounded-[3.5rem] flex items-center justify-between group cursor-pointer hover:border-stratum-accent/30 transition-all shadow-xl bg-white/[0.02]">
-                    <div className="flex items-center space-x-8">
-                        <div className="w-20 h-20 bg-stratum-accent/10 rounded-[2rem] flex items-center justify-center text-stratum-accent group-hover:scale-110 transition-all duration-700 shadow-[inset_0_0_20px_rgba(0,242,255,0.1)]">
-                            <Activity className="w-10 h-10 animate-pulse" />
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-bold text-white mb-0.5">Global Stress Audit</h4>
-                            <p className="text-[9px] text-white/40 max-w-[200px]">Planetary infrastructure scan completed across {metrics.nodes_monitored} persistent monitoring nodes.</p>
-                        </div>
-                    </div>
-                    <div className="hidden sm:block h-3 w-40 bg-white/5 rounded-full overflow-hidden p-0.5">
-                        <div className="h-full w-full bg-white/[0.02] rounded-full overflow-hidden">
-                            <motion.div
-                                animate={{ width: ['20%', '80%', '40%', '90%', '60%'] }}
-                                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-                                className="h-full bg-gradient-to-r from-stratum-accent to-[#0088ff] rounded-full"
-                            />
-                        </div>
-                    </div>
-                </div>
 
-                <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="glass-panel py-5 px-8 rounded-2xl bg-stratum-accent text-black flex items-center justify-center space-x-4 hover:bg-white transition-all transform group shadow-[0_10px_30px_rgba(0,242,255,0.15)]"
-                >
-                    <Shield className="w-4 h-4" />
-                    <div className="text-left">
-                        <span className="text-xs font-black uppercase tracking-widest block leading-none mb-1">Generate Audit</span>
-                        <span className="text-[8px] font-black uppercase opacity-60 tracking-widest">S-14 Protocol</span>
-                    </div>
-                </motion.button>
-            </div>
         </div>
     );
 };

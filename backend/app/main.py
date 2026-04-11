@@ -15,7 +15,8 @@ from .services.data_sources import DataSourceService
 from .services.intelligence import IntelligenceService
 from .services.database import (
     upsert_cell, save_scan_point, get_cell_history_from_db,
-    save_upload, get_recent_uploads, get_all_cells_summary
+    save_upload, get_recent_uploads, get_all_cells_summary,
+    save_alert, get_all_alerts_from_db, delete_alert_from_db
 )
 import aiofiles
 from pathlib import Path
@@ -55,6 +56,74 @@ G = nx.Graph()
 def get_h3_cell(lat, lon):
     return h3.latlng_to_cell(lat, lon, 7)
 
+# ── GEOSPATIAL HELPERS ──────────────────────────────────────────────
+async def get_location_name(lat, lng):
+    """Reverse geocode coordinates to a human-readable name."""
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1"
+    headers = {"User-Agent": "STRATUM-Ayaanshaikh/1.0"}
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.get(url, headers=headers, timeout=5.0)
+            if res.status_code == 200:
+                addr = res.json().get('address', {})
+                city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('suburb') or addr.get('district')
+                state = addr.get('state')
+                if city and state:
+                    return f"{city}, {state}"
+                elif state:
+                    return state
+        except Exception as e:
+            print(f"Geocoding error: {e}")
+    return f"Sector {lat:.2f}N {lng:.2f}E"
+
+# ── DISASTER RULE ENGINE ───────────────────────────────────────────────────
+ALERT_TYPES = ["FLOOD", "DROUGHT", "CYCLONE", "EARTHQUAKE", "VEGETATION_STRESS", "NORMAL"]
+
+def predict_alert_type(ndvi, rainfall, soil_moisture, wind, seismic_mag):
+    """Authoritative Rule Engine (No Guessing)"""
+    if seismic_mag > 4.5: return "EARTHQUAKE"
+    if seismic_mag > 3.0: return "SEISMIC_DISTURBANCE"
+    if wind > 75 and rainfall > 20: return "CYCLONE"
+    if wind > 40: return "HIGH_WIND"
+    if rainfall > 40 and soil_moisture > 0.85: return "CRITICAL_FLOOD"
+    if rainfall > 15 and soil_moisture > 0.7: return "FLOOD"
+    if rainfall < 0.5 and ndvi < 0.2: return "DROUGHT"
+    if ndvi < 0.3 or (rainfall > 10 and ndvi < 0.35): return "VEGETATION_STRESS"
+    return "NORMAL"
+
+def get_alert_explanation(type, rainfall, ndvi, seismic_mag, wind):
+    """Backup explanation logic if LLM is offline."""
+    if "FLOOD" in type: return f"High rainfall ({rainfall}mm) causing soil saturation risk."
+    if type == "DROUGHT": return f"Precipitation deficit + vegetation index ({ndvi}) collapse."
+    if type == "CYCLONE": return f"Extreme wind force ({wind}km/h) + heavy rain bands."
+    if "SEISMIC" in type or type == "EARTHQUAKE": return f"Significant tectonic displacement (Mag {seismic_mag}) detected."
+    if type == "HIGH_WIND": return f"Gale-force winds ({wind}km/h) impacting structural integrity."
+    if type == "VEGETATION_STRESS": return f"NDVI drop ({ndvi}) indicating biomass health decline."
+    return "Environmental metrics within baseline operational parameters."
+
+# ── ALERT SYSTEM DATABASE ───────────────────────────────────────────
+alerts_db = []
+
+def generate_alert(cell_id, risk, status, cause, location="Unknown Sector", trigger="Anomaly"):
+    """System-wide alert generator logic."""
+    if status == "ANOMALY" or risk > 40:
+        alert = {
+            "id": len(alerts_db) + 1,
+            "cell": cell_id,
+            "location": location,
+            "trigger": trigger,
+            "risk": risk,
+            "status": status,
+            "message": f"⚠️ PREDICTIVE ALERT: {cause}",
+            "time": datetime.now().isoformat()
+        }
+        # Avoid duplicate alerts for the same cell in a short window
+        if not any(a["cell"] == cell_id and (datetime.now() - datetime.fromisoformat(a["time"])).seconds < 3600 for a in alerts_db[-5:]):
+            alerts_db.insert(0, alert)
+            asyncio.create_task(save_alert(alert))
+            return alert
+    return None
+
 def update_baseline(cell_id, value):
     baseline_db[cell_id].append(round(float(value), 4))
     if len(baseline_db[cell_id]) > 90:
@@ -68,15 +137,9 @@ def detect_anomaly(current, history):
     avg = sum(history) / len(history)
     return "ANOMALY" if abs(current - avg) > 0.15 else "NORMAL"
 
-def find_cause(rainfall, seismic_mag, temp):
-    if rainfall > 15:
-        return f"High-intensity rainfall ({rainfall:.1f} mm/d) — soil saturation risk"
-    elif seismic_mag > 3.0:
-        return f"Seismic activity Mag {seismic_mag:.1f} — structural shear stress"
-    elif temp > 38:
-        return f"Extreme surface temperature ({temp:.1f}°C) — thermal infrastructure stress"
-    else:
-        return f"Within baseline tolerance — precipitation {rainfall:.1f} mm/d, temp {temp:.1f}°C"
+# (Replaced by Explanation Engine)
+def find_cause(type, ndvi, rainfall, seismic_mag, temp, wind, soil):
+    return get_alert_explanation(type, rainfall, ndvi, seismic_mag, wind)
 
 def simulate_risk(rainfall, temp, seismic_mag, humidity):
     """Tiered environmental risk model. Returns 5–99%."""
@@ -131,48 +194,64 @@ async def run_cell_pipeline(lat: float, lng: float):
         try: return float(val) if val not in ("N/A", None) else default
         except: return default
 
+    # DECISION ENGINE (Rule Based)
     rainfall_f = to_float(nasa_data.get("rainfall"), 0.0)
     temp_f     = to_float(nasa_data.get("temp"), 22.0)
     humidity_f = to_float(nasa_data.get("humidity"), 50.0)
+    wind_f     = to_float(nasa_data.get("wind_speed"), 0.0)
+    soil_f     = to_float(nasa_data.get("soil_moisture"), 0.4)
+    ndvi_f     = to_float(nasa_data.get("ndvi"), 0.5)
     seismic_f  = to_float(seismic.get("mag") if seismic else None, 0.0)
 
-    update_baseline(cell_id, rainfall_f)
-    history = list(baseline_db[cell_id])
-    cell_metadata[cell_id] = {"nasa": nasa_data, "seismic": seismic}
+    # 1. Decide Type
+    alert_type = predict_alert_type(ndvi_f, rainfall_f, soil_f, wind_f, seismic_f)
+    
+    # 2. Estimate Risk
+    forecast_risk = simulate_risk(rainfall_f, temp_f, seismic_f, humidity_f)
+    if alert_type != "NORMAL": forecast_risk = max(forecast_risk, 45.0)
 
-    anomaly_status = detect_anomaly(rainfall_f, history)
-
-    # Run Featherless LLM (non-blocking — don't crash if slow)
+    # 3. LLM only explains the decision
     try:
-        ai_analysis = await IntelligenceService.get_ai_reasoning(
-            nasa_data, seismic, lat=lat, lng=lng
+        explanation = await IntelligenceService.get_ai_explanation(
+            alert_type, 
+            {"rainfall": rainfall_f, "ndvi": ndvi_f, "wind": wind_f, "soil": soil_f, "seismic": seismic_f}
         )
     except Exception as e:
         print(f"LLM error: {e}")
-        ai_analysis = find_cause(rainfall_f, seismic_f, temp_f)
+        explanation = get_alert_explanation(alert_type, rainfall_f, ndvi_f, seismic_f, wind_f)
 
-    forecast_risk = simulate_risk(rainfall_f, temp_f, seismic_f, humidity_f)
     status = "CRITICAL" if forecast_risk > 70 else "WARNING" if forecast_risk > 35 else "STABLE"
-    cause = find_cause(rainfall_f, seismic_f, temp_f)
 
-    # Graph propagation
-    neighbor = h3.cell_to_parent(cell_id)
-    G.add_edge(cell_id, neighbor)
+    # Save to metadata
+    cell_metadata[cell_id] = {"nasa": nasa_data, "seismic": seismic, "type": alert_type}
+
+    # Generate alert if conditions met
+    location_name = await get_location_name(lat, lng)
+    alert = generate_alert(
+        cell_id, 
+        forecast_risk, 
+        status if alert_type != "NORMAL" else "STABLE", 
+        explanation, 
+        location=location_name, 
+        trigger=alert_type
+    )
 
     result = {
         "node_id": cell_id,
+        "location": location_name,
         "lat": lat,
         "lng": lng,
         "risk": forecast_risk,
         "status": status,
-        "anomaly": anomaly_status,
-        "cause": cause,
-        "ai_report": ai_analysis,
-        "prediction": ai_analysis,
-        "history": history,
-        "impacted_nodes": list(G.neighbors(cell_id)),
+        "alert_type": alert_type,
+        "cause": explanation,
+        "ai_report": explanation,
+        "prediction": explanation,
+        "history": [], # Baseline history refactoring in progress
+        "impacted_nodes": list(G.neighbors(cell_id)) if cell_id in G else [],
         "nasa": nasa_data,
-        "seismic": seismic
+        "seismic": seismic,
+        "alert": alert
     }
 
     # Persist to MongoDB (fire and forget — don't block response)
@@ -314,18 +393,17 @@ async def get_agents_global():
 
 @app.get("/api/alerts")
 async def get_alerts():
-    anomalies = []
-    for cid, hist in baseline_db.items():
-        if len(hist) >= 2 and detect_anomaly(hist[-1], hist) == "ANOMALY":
-            meta = cell_metadata.get(cid, {})
-            nasa = meta.get("nasa", {})
-            anomalies.append({
-                "id": cid,
-                "msg": f"Cell {cid[:8]}… — precipitation anomaly: {nasa.get('rainfall','?')} mm/d",
-                "severity": "error",
-                "time": datetime.now().strftime("%H:%M")
-            })
-    return anomalies[:10]
+    db_alerts = await get_all_alerts_from_db(limit=50)
+    if db_alerts:
+        return db_alerts
+    return alerts_db[:50]
+
+@app.delete("/api/alerts/{alert_id}")
+async def delete_alert(alert_id: str):
+    success = await delete_alert_from_db(alert_id)
+    if success:
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Alert not found")
 
 @app.get("/api/anomalies")
 async def get_anomalies():

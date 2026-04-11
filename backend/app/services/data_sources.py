@@ -74,17 +74,35 @@ class DataSourceService:
         # Rainfall: tropical belt (±25° lat) gets more rain
         if abs_lat < 10:
             rainfall = round(random.uniform(5, 20), 2)
+            wind_speed = round(random.uniform(10, 30), 1)
         elif abs_lat < 25:
             rainfall = round(random.uniform(2, 12), 2)
+            wind_speed = round(random.uniform(5, 20), 1)
         elif abs_lat < 50:
             rainfall = round(random.uniform(0.5, 6), 2)
+            wind_speed = round(random.uniform(2, 12), 1)
         else:
             rainfall = round(random.uniform(0, 3), 2)
+            wind_speed = round(random.uniform(1, 8), 1)
+        
+        # NDVI and Soil Moisture grounded in Climate
+        ndvi = round(random.uniform(0.1, 0.8), 2)
+        if rainfall > 15: 
+            soil_moisture = round(random.uniform(0.6, 0.95), 2)
+            ndvi = min(0.9, ndvi + 0.2)
+        elif rainfall < 2:
+            soil_moisture = round(random.uniform(0.05, 0.3), 2)
+            ndvi = max(0.05, ndvi - 0.2)
+        else:
+            soil_moisture = round(random.uniform(0.3, 0.6), 2)
         
         return {
             "temp": temp,
             "humidity": humidity,
             "rainfall": rainfall,
+            "wind_speed": wind_speed,
+            "soil_moisture": soil_moisture,
+            "ndvi": ndvi,
             "source": "STRATUM ESTIMATE"
         }
 

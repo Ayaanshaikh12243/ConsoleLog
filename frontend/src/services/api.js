@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:8000/api';
-const DISASTER_SERVICE_URL = 'http://localhost:5000';
+const DISASTER_SERVICE_URL = 'http://localhost:5050';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

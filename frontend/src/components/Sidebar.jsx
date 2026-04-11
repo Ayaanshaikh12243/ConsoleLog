@@ -20,8 +20,8 @@ const Sidebar = () => {
 
   const menuItems = [
     { icon: Globe, label: 'Map', path: '/' },
+    { icon: AlertTriangle, label: 'Alerts', path: '/alerts' },
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
-    { icon: Cpu, label: 'Agents', path: '/agents' },
     { icon: FileText, label: 'Reports', path: '/reports' },
     { icon: Upload, label: 'Submissions', path: '/submissions' },
     { icon: Database, label: 'History', path: '/history' },
@@ -50,19 +50,7 @@ const Sidebar = () => {
           ))}
         </nav>
 
-        {/* Node Health Mini Panel */}
-        <div className="mt-10 pt-8 border-t border-white/10 hidden lg:block">
-            <h4 className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em] mb-6">Unit Integrity</h4>
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black text-white/60">CORTEX-X1</span>
-                <div className="w-1.5 h-1.5 bg-stratum-accent rounded-full animate-pulse shadow-[0_0_8px_#00f2ff]"></div>
-              </div>
-              <div className="h-0.5 bg-white/5 w-full rounded-full overflow-hidden">
-                <div className="h-full bg-stratum-accent w-3/4"></div>
-              </div>
-            </div>
-        </div>
+
       </div>
     </aside>
   );

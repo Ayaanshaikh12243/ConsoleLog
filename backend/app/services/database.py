@@ -140,3 +140,47 @@ async def get_all_cells_summary():
     except Exception as e:
         print(f"MongoDB get_all_cells error: {e}")
         return []
+
+async def save_alert(alert_data: dict):
+    """Save a predictive alert to MongoDB."""
+    try:
+        db = await get_db()
+        doc = {
+            "cell_id": alert_data.get("cell"),
+            "location": alert_data.get("location", "Unknown Sector"),
+            "risk": alert_data.get("risk"),
+            "status": alert_data.get("status"),
+            "message": alert_data.get("message"),
+            "trigger": alert_data.get("trigger", "Environmental Anomaly"),
+            "timestamp": datetime.fromisoformat(alert_data.get("time")) if isinstance(alert_data.get("time"), str) else datetime.utcnow()
+        }
+        await db.alerts.insert_one(doc)
+    except Exception as e:
+        print(f"MongoDB save_alert error: {e}")
+
+async def get_all_alerts_from_db(limit: int = 50):
+    """Fetch predictive alerts from MongoDB."""
+    try:
+        db = await get_db()
+        cursor = db.alerts.find({}).sort("timestamp", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        # Format for frontend
+        for d in docs:
+            d["id"] = str(d.pop("_id"))
+            d["cell"] = d.get("cell_id")
+            d["time"] = d.get("timestamp").isoformat() if d.get("timestamp") else datetime.now().isoformat()
+        return docs
+    except Exception as e:
+        print(f"MongoDB get_all_alerts error: {e}")
+        return []
+
+async def delete_alert_from_db(alert_id: str):
+    """Remove an alert from MongoDB by its hex ID string."""
+    try:
+        from bson import ObjectId
+        db = await get_db()
+        await db.alerts.delete_one({"_id": ObjectId(alert_id)})
+        return True
+    except Exception as e:
+        print(f"MongoDB delete_alert error: {e}")
+        return False

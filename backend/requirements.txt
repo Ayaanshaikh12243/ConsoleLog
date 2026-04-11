@@ -21,3 +21,5 @@ h3
 python-multipart
 aiofiles
 websockets
+apscheduler==3.10.4
+aiosqlite==0.20.0
