@@ -4,7 +4,6 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import MapPage from './pages/MapPage';
 import AnalyticsPage from './pages/AnalyticsPage';
-
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import HistoryPage from './pages/HistoryPage';
@@ -26,7 +25,6 @@ function App() {
               <Route path="/" element={<MapPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
-
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/uploads" element={<UploadsPage />} />
               <Route path="/history" element={<HistoryPage />} />

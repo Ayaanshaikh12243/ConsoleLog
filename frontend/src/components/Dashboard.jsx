@@ -247,9 +247,6 @@ const Dashboard = ({ onClose }) => {
           </div>
         </div>
 
-
-
-
       </div>
 
 
