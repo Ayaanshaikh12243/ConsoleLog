@@ -7,6 +7,7 @@ from pathlib import Path
 import h3
 import math
 import numpy as np
+import httpx
 
 from ..ml.audio_self_supervised import AudioSelfSupervisedBaseline
 from ..ml.video_real_time_processor import VideoRealtimeProcessor
@@ -160,7 +161,7 @@ async def submit_photo(
         h3_cell = h3.latlng_to_cell(location_lat, location_lon, 8)
         validation_result = photo_spoofing.validate_submission(str(file_path), contributor_id, (location_lat, location_lon), timestamp)
         
-        # Classify damage type using video processor on single frame
+        # Classify damage type using video processor on single frame (fallback)
         damage_type = "normal"
         damage_confidence = 0.0
         damage_severity = "E"
@@ -173,7 +174,26 @@ async def submit_photo(
                 damage_severity = frame_result.severity_grade
         except Exception as e:
             logger.warning(f"Damage classification error: {e}, using normal")
-            damage_type = "normal"
+
+        # Call Flask disaster classifier for image-level disaster type
+        disaster_prediction = None
+        disaster_confidence = None
+        disaster_all_probs = {}
+        try:
+            with open(file_path, "rb") as img_file:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        "http://localhost:5000/predict",
+                        files={"file": (file_path.name, img_file, "image/jpeg")}
+                    )
+                if resp.status_code == 200:
+                    dr = resp.json()
+                    disaster_prediction = dr.get("prediction")
+                    disaster_confidence = dr.get("confidence")
+                    disaster_all_probs = dr.get("all_probabilities", {})
+                    logger.info(f"Disaster model: {disaster_prediction} ({disaster_confidence:.1f}%)")
+        except Exception as e:
+            logger.warning(f"Disaster classifier unavailable: {e}")
         
         observation = Observation(
             was_accurate=True,
@@ -198,6 +218,11 @@ async def submit_photo(
             "damage_type": damage_type,
             "damage_confidence": damage_confidence,
             "damage_severity": damage_severity,
+            "disaster_classification": {
+                "prediction": disaster_prediction,
+                "confidence": disaster_confidence,
+                "all_probabilities": disaster_all_probs
+            },
             "validation": {
                 "exif_valid": validation_result.exif_valid,
                 "gps_consistent": validation_result.gps_consistent,

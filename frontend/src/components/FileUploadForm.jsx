@@ -9,15 +9,7 @@ import {
   Image as ImageIcon, 
   Video, 
   Mic,
-  Loader2,
-  Shield,
-  Zap,
-  Fingerprint,
-  Search,
-  Activity,
-  History,
-  TrendingUp,
-  UserCheck
+  Loader2
 } from 'lucide-react';
 
 const FileUploadForm = ({ type, onUpload, isLoading, result }) => {
@@ -189,175 +181,232 @@ const FileUploadForm = ({ type, onUpload, isLoading, result }) => {
         </button>
       </form>
 
-      {/* Enhanced Intelligence Brief */}
+      {/* Improved Results Display */}
       <AnimatePresence>
         {result && (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mt-6 pt-6 border-t border-white/5 space-y-5"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-8 bg-gradient-to-br from-[#1e1e2e] to-[#2d2d44] border border-stratum-accent/30 p-6 rounded-xl text-[#e0e0e0] w-full"
           >
-            {/* Brief Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                 <div className="p-1.5 bg-stratum-accent/10 rounded-lg">
-                   <Zap className="w-3 h-3 text-stratum-accent" />
-                 </div>
-                 <h3 className="text-[10px] font-black uppercase text-white tracking-widest">Autonomous Briefing</h3>
-              </div>
-              <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${result.status === 'accepted' ? 'bg-risk-low/10 text-risk-low border-risk-low/20' : 'bg-risk-high/10 text-risk-high border-risk-high/20'}`}>
-                {result.status}
-              </span>
+            {/* Header */}
+            <div className="border-b-2 border-stratum-accent/20 pb-4 mb-6">
+              <h3 className="text-stratum-accent text-xl font-bold mb-2 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5" /> Submission Result
+              </h3>
+              <p className="text-[#aaa] text-xs font-mono">ID: {result.submission_id}</p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-               {/* Metadata & Authenticity Matrix */}
-               <div className="glass-panel p-4 rounded-2xl border-white/5 relative overflow-hidden">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Fingerprint className="w-3 h-3 text-white/20" />
-                    <span className="text-[9px] font-black uppercase text-white/30 tracking-widest">Validation Matrix</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                    <div>
-                      <p className="text-[8px] text-white/20 uppercase font-black mb-1">Authenticity Score</p>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-black text-white">{((1 - (result.validation?.spoofing_risk || 0)) * 100).toFixed(0)}%</span>
-                        <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                          <div className="h-full bg-stratum-accent w-[96%]"></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-[8px] text-white/20 uppercase font-black mb-1">Node Reputation</p>
-                      <div className="flex items-center gap-2">
-                        <UserCheck className="w-3 h-3 text-risk-low" />
-                        <span className="text-[10px] font-black text-white uppercase">{result.contributor_trust_score?.toFixed(3)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-white/5">
-                    <div className="flex flex-col">
-                      <span className="text-[7px] text-white/20 uppercase font-black">EXIF</span>
-                      <span className={`text-[9px] font-bold ${result.validation?.exif_valid ? 'text-risk-low' : 'text-risk-high'}`}>
-                        {result.validation?.exif_valid ? 'SECURE' : 'VOID'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col text-center">
-                      <span className="text-[7px] text-white/20 uppercase font-black">GPS SYNC</span>
-                      <span className={`text-[9px] font-bold ${result.validation?.gps_consistent ? 'text-risk-low' : 'text-risk-high'}`}>
-                        {result.validation?.gps_consistent ? 'VERIFIED' : 'DRIFT'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col text-right">
-                      <span className="text-[7px] text-white/20 uppercase font-black">QUALITY</span>
-                      <span className="text-[9px] font-bold text-stratum-accent">
-                        {Math.round((result.validation?.image_quality_score || 0) * 100)}%
-                      </span>
-                    </div>
-                  </div>
-               </div>
-
-               {/* Damage & Causal Analysis */}
-               <div className="glass-panel p-4 rounded-2xl border-white/5">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                       <Activity className="w-3 h-3 text-risk-high" />
-                       <span className="text-[9px] font-black uppercase text-white/30 tracking-widest">Damage Vector</span>
-                    </div>
-                    <span className="text-[8px] font-mono text-white/20">CONFIDENCE: {Math.round((result.damage_confidence || 0) * 100)}%</span>
-                  </div>
-
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <h4 className="text-sm font-black text-white uppercase tracking-tighter mb-1">
-                        {result.damage_type?.replace('_', ' ') || 'ANALYSIS PENDING'}
-                      </h4>
-                      <p className="text-[10px] text-white/40 italic leading-none">Severity Grade: <span className="text-stratum-accent font-black">{result.damage_severity || 'E'}</span></p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[8px] text-white/20 uppercase font-black mb-1">Priority</p>
-                      <span className={`text-[9px] font-black px-2 py-0.5 rounded ${result.damage_severity === 'A' || result.damage_severity === 'B' ? 'bg-risk-high text-white' : 'bg-risk-low/20 text-risk-low'}`}>
-                         {result.damage_severity === 'A' || result.damage_severity === 'B' ? 'CRITICAL' : 'ROUTINE'}
-                      </span>
-                    </div>
-                  </div>
-               </div>
+            {/* Status Section */}
+            <div className="mb-6 p-4 bg-stratum-accent/5 rounded-lg border-l-4 border-stratum-accent">
+              {result.status === 'accepted' ? (
+                <>
+                  <span className="inline-block px-3 py-1 bg-green-500/20 text-green-400 border border-green-500/50 rounded-full text-xs font-bold mb-2">✅ ACCEPTED</span>
+                  <p className="text-[#ccc] text-sm mt-1">Your submission was processed and accepted by the system.</p>
+                </>
+              ) : result.status === 'review' ? (
+                <>
+                  <span className="inline-block px-3 py-1 bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 rounded-full text-xs font-bold mb-2">⚠️ NEEDS REVIEW</span>
+                  <p className="text-[#ccc] text-sm mt-1">Your submission needs manual review by an expert.</p>
+                </>
+              ) : (
+                <>
+                  <span className="inline-block px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/50 rounded-full text-xs font-bold mb-2">❌ REJECTED</span>
+                  <p className="text-[#ccc] text-sm mt-1">Your submission could not be processed.</p>
+                </>
+              )}
             </div>
 
-            {/* Neural Summary */}
-            {(result.prediction || result.analysis) && (
-              <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/5">
-                <p className="text-[10px] text-white/60 leading-relaxed italic">
-                  "{result.analysis || result.prediction}"
-                </p>
+            {/* Damage Analysis */}
+            {(type === 'photo' || type === 'video') && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+                <h4 className="text-stratum-accent text-base font-bold mb-3">🔍 Damage Analysis</h4>
+                {result.validation && result.validation.recommendation === 'accept' ? (
+                  <p className="text-green-400 font-medium m-0">✅ Image appears to be authentic and real.</p>
+                ) : (
+                  <p className="text-yellow-400 font-medium m-0">⚠️ Media may need verification.</p>
+                )}
               </div>
             )}
 
-            {/* Protocol Summary & Next Steps */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-white/5">
-                <div className="space-y-3">
-                   <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] mb-1">Protocol Pipeline</p>
-                   <div className="flex flex-col gap-2.5">
-                      <div className="flex items-start gap-3">
-                        <div className="w-1 h-1 rounded-full bg-risk-low mt-1.5 shrink-0"></div>
-                        <span className="text-[10px] text-white/50 font-medium leading-tight">Data Ingested & Persistent</span>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-1 h-1 rounded-full bg-stratum-accent mt-1.5 shrink-0 animate-pulse"></div>
-                        <span className="text-[10px] text-white/50 font-medium leading-tight">SENTINEL-7 Correlation Active</span>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-1 h-1 rounded-full bg-white/20 mt-1.5 shrink-0"></div>
-                        <span className="text-[10px] text-white/30 font-medium leading-tight">Disaster Mapping Propagation</span>
-                      </div>
-                   </div>
+            {/* Authenticity Checks (Table) */}
+            {result.validation && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+                <h4 className="text-stratum-accent text-base font-bold mb-4">🛡️ Authenticity Checks</h4>
+                <table className="w-full text-sm border-collapse">
+                  <tbody>
+                    <tr className={`border-b border-stratum-accent/10 ${result.validation.exif_valid ? 'bg-green-500/5' : 'bg-red-500/5'}`}>
+                      <td className="p-3 text-stratum-accent font-semibold w-2/5">Metadata Valid:</td>
+                      <td className="p-3 font-medium text-white">{result.validation.exif_valid ? '✅ Yes' : '⚠️ No metadata'}</td>
+                      <td className="p-3 text-[#888] text-xs italic hidden sm:table-cell">Camera info and EXIF data</td>
+                    </tr>
+                    <tr className={`border-b border-stratum-accent/10 ${result.validation.gps_consistent ? 'bg-green-500/5' : 'bg-red-500/5'}`}>
+                      <td className="p-3 text-stratum-accent font-semibold">GPS Consistent:</td>
+                      <td className="p-3 font-medium text-white">{result.validation.gps_consistent ? '✅ Yes' : '❌ Invalid'}</td>
+                      <td className="p-3 text-[#888] text-xs italic hidden sm:table-cell">Location makes sense</td>
+                    </tr>
+                    <tr className="border-b border-stratum-accent/10 bg-blue-500/5">
+                      <td className="p-3 text-stratum-accent font-semibold">Deepfake Risk:</td>
+                      <td className="p-3 font-medium text-white">{result.validation.spoofing_risk !== undefined ? (result.validation.spoofing_risk * 100).toFixed(1) : 0}%</td>
+                      <td className="p-3 text-[#888] text-xs italic hidden sm:table-cell">{(result.validation.spoofing_risk || 0) < 0.1 ? '✅ Very low' : '⚠️ Possible AI'}</td>
+                    </tr>
+                    <tr className="bg-blue-500/5">
+                      <td className="p-3 text-stratum-accent font-semibold">Image Quality:</td>
+                      <td className="p-3 font-medium text-white">{result.validation.image_quality_score !== undefined ? (result.validation.image_quality_score * 100).toFixed(0) : 100}%</td>
+                      <td className="p-3 text-[#888] text-xs italic hidden sm:table-cell">{(result.validation.image_quality_score || 1) > 0.5 ? '✅ Good' : '⚠️ Low quality'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Damage Specific (Video/Audio) */}
+            {result.damage_type && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+                <h4 className="text-stratum-accent text-base font-bold mb-3">⚠️ Detected Damage</h4>
+                <div className="mb-4">
+                  <h5 className="text-white text-base float-left font-bold m-0 uppercase tracking-wide">
+                    {result.damage_type.replace(/_/g, ' ')}
+                  </h5>
+                  <div className="clear-both hidden"></div>
+                </div>
+                
+                {/* Confidence Bar */}
+                <div className="h-8 bg-black/50 rounded-full border border-stratum-accent/20 overflow-hidden relative mt-4 mb-3">
+                  <div 
+                    className="h-full bg-gradient-to-r from-stratum-accent to-[#0dd9ff] transition-all duration-500" 
+                    style={{ width: `${(result.damage_confidence || result.confidence || 0) * 100}%` }}
+                  />
+                  <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white font-bold text-xs drop-shadow-md">
+                    {((result.damage_confidence || result.confidence || 0) * 100).toFixed(0)}% Confidence
+                  </span>
                 </div>
 
-                <div className="flex flex-col justify-between items-end">
-                   <div className="flex gap-6 mb-4">
-                    <div className="flex flex-col text-right">
-                      <span className="text-[7px] text-white/20 uppercase font-black tracking-widest mb-1">H3 CELL</span>
-                      <span className="text-[9px] font-mono text-white/40 leading-none">{result.h3_cell?.slice(0, 10)}</span>
-                    </div>
-                    <div className="flex flex-col text-right border-l border-white/5 pl-6">
-                      <span className="text-[7px] text-white/20 uppercase font-black tracking-widest mb-1">PAYLOAD</span>
-                      <span className="text-[9px] font-mono text-white/40 leading-none">JSON-V1</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    <div className="h-[1px] w-12 bg-white/5"></div>
-                    <details className="group relative">
-                      <summary className="text-[9px] font-black uppercase text-white/30 tracking-[0.2em] hover:text-stratum-accent transition-all cursor-pointer list-none py-1 px-3 glass-panel rounded-full border border-white/5 hover:border-stratum-accent/20">
-                        [TELEMETRY]
-                      </summary>
-                      <div className="fixed inset-0 z-[100] pointer-events-none flex items-center justify-center p-6 md:p-20">
-                         <div className="pointer-events-auto max-w-2xl w-full glass-panel p-8 rounded-[2rem] border-stratum-accent/20 max-h-[85vh] overflow-y-auto custom-scrollbar shadow-[0_0_100px_rgba(0,0,0,0.9)] animate-in fade-in zoom-in duration-300">
-                            <div className="flex justify-between items-center mb-6">
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 bg-stratum-accent/10 rounded-xl">
-                                  <Activity className="w-4 h-4 text-stratum-accent" />
-                                </div>
-                                <span className="text-xs font-black text-white tracking-widest uppercase">System Raw Export</span>
-                              </div>
-                              <button onClick={(e) => e.target.closest('details').open = false} className="p-2 rounded-full hover:bg-white/5 text-white/20 hover:text-white transition-colors">
-                                <X className="w-5 h-5"/>
-                              </button>
-                            </div>
-                            <pre className="text-[11px] text-stratum-accent/60 font-mono leading-relaxed bg-black/40 p-6 rounded-2xl border border-white/5">
-                              {JSON.stringify(result, null, 2)}
-                            </pre>
-                            <div className="mt-6 pt-6 border-t border-white/5 flex justify-end">
-                               <p className="text-[8px] font-black text-white/10 uppercase tracking-widest">End of Telemetry Log</p>
-                            </div>
-                         </div>
-                      </div>
-                    </details>
+                {(() => {
+                  const severity = result.damage_severity || result.severity_grade || 'E';
+                  return (
+                    <>
+                      <p className="text-white text-sm mt-3 mb-1 font-medium">Severity: <strong className="text-stratum-accent text-lg">GRADE {severity}</strong></p>
+                      <p className="text-[#888] text-xs italic m-0">
+                        {severity === 'A' ? 'Critical damage detected' : severity === 'B' ? 'Moderate damage detected' : severity === 'C' ? 'Minor damage detected' : 'Minimal damage detected'}
+                      </p>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Disaster Classification (Flask model) */}
+            {result.disaster_classification && result.disaster_classification.prediction && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-[#ff6b6b]">
+                <h4 className="text-[#ff6b6b] text-base font-bold mb-3">🌪️ Disaster Classification</h4>
+                <div className="flex items-center gap-4 mb-4 p-3 bg-[#ff6b6b]/5 rounded-lg">
+                  <span className="text-3xl">
+                    {result.disaster_classification.prediction === 'cyclone' ? '🌀' :
+                     result.disaster_classification.prediction === 'earthquake' ? '🏚️' :
+                     result.disaster_classification.prediction === 'flood' ? '🌊' :
+                     result.disaster_classification.prediction === 'wildfire' ? '🔥' : '⚠️'}
+                  </span>
+                  <div>
+                    <p className="text-white font-bold text-lg uppercase tracking-wider">{result.disaster_classification.prediction}</p>
+                    <p className="text-[#ff6b6b] text-sm font-bold">{result.disaster_classification.confidence?.toFixed(1)}% confidence</p>
                   </div>
                 </div>
+                {result.disaster_classification.all_probabilities && Object.keys(result.disaster_classification.all_probabilities).length > 0 && (
+                  <div className="space-y-2">
+                    {Object.entries(result.disaster_classification.all_probabilities).map(([cls, prob]) => (
+                      <div key={cls} className="flex items-center gap-3">
+                        <span className="text-[#888] text-xs w-20 capitalize">{cls}</span>
+                        <div className="flex-1 h-2 bg-black/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-[#ff6b6b] to-[#ffa500] transition-all duration-500"
+                            style={{ width: `${prob}%` }}
+                          />
+                        </div>
+                        <span className="text-white text-xs font-bold w-12 text-right">{prob}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Spoofing Risk / Authenticity Meter */}
+            {result.validation && result.validation.spoofing_risk !== undefined && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+                <h4 className="text-stratum-accent text-base font-bold mb-3">🔐 Authenticity Score</h4>
+                
+                {(() => {
+                  const authenticity = 100 - (result.validation.spoofing_risk * 100);
+                  const color = authenticity > 70 ? '#28a745' : authenticity > 40 ? '#ffc107' : '#dc3545';
+                  return (
+                    <>
+                      <div className="h-10 bg-black/50 rounded-full border border-stratum-accent/20 overflow-hidden relative mt-4 mb-3">
+                        <div 
+                          className="h-full transition-all duration-500" 
+                          style={{ width: `${authenticity}%`, backgroundColor: color }}
+                        />
+                      </div>
+                      <p className="text-white font-bold text-sm mb-1">{authenticity.toFixed(0)}% Authentic</p>
+                      <p className="text-[#888] text-xs italic m-0">
+                        {authenticity > 80 ? '✅ This appears to be a genuine, unmanipulated image.' : authenticity > 50 ? '⚠️ This image has some characteristics that warrant verification.' : '❌ This image may be manipulated or fake.'}
+                      </p>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Contributor Reputation */}
+            {result.contributor_trust_score !== undefined && (
+              <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+                <h4 className="text-stratum-accent text-base font-bold mb-3">👤 Your Reputation Score</h4>
+                
+                {(() => {
+                  const score = result.contributor_trust_score;
+                  const tier = score > 0.7 ? 'TRUSTED' : score < 0.4 ? 'QUESTIONABLE' : 'NEUTRAL';
+                  const tierColor = score > 0.7 ? 'text-green-500' : score < 0.4 ? 'text-red-500' : 'text-yellow-500';
+                  
+                  return (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 my-4 p-4 bg-stratum-accent/5 rounded-lg">
+                      <span className="text-3xl font-bold text-stratum-accent min-w-[80px]">{score.toFixed(3)}</span>
+                      <span className={`text-lg font-bold ${tierColor}`}>{tier}</span>
+                    </div>
+                  );
+                })()}
+                <p className="text-[#888] text-xs italic m-0">Based on your submission accuracy and consistency.</p>
+              </div>
+            )}
+
+            {/* Next Steps */}
+            <div className="mb-6 p-4 bg-black/30 rounded-lg border-l-4 border-stratum-accent">
+              <h4 className="text-stratum-accent text-base font-bold mb-3">📌 What Happens Next?</h4>
+              <ul className="list-none p-0 m-0 space-y-2">
+                {result.status === 'accepted' ? (
+                  <>
+                    <li className="text-[#ccc] text-sm pb-2 border-b border-stratum-accent/10">✅ Your data has been stored</li>
+                    <li className="text-[#ccc] text-sm pb-2 border-b border-stratum-accent/10">🛰️ Will be correlated with satellite signals</li>
+                    <li className="text-[#ccc] text-sm pb-2 border-b border-stratum-accent/10">📊 Used to build better disaster maps</li>
+                    <li className="text-[#ccc] text-sm">🎯 Helps emergency responders</li>
+                  </>
+                ) : (
+                  <>
+                    <li className="text-[#ccc] text-sm pb-2 border-b border-stratum-accent/10">⏳ Waiting for expert review</li>
+                    <li className="text-[#ccc] text-sm pb-2 border-b border-stratum-accent/10">📧 You'll be notified of decision</li>
+                    <li className="text-[#ccc] text-sm">💡 Make sure photo is clear and focused</li>
+                  </>
+                )}
+              </ul>
             </div>
+
+            {/* Raw Data Toggle */}
+            <details className="mt-6 p-4 bg-black/50 rounded-lg border border-stratum-accent/10 cursor-pointer group">
+              <summary className="text-stratum-accent font-bold select-none group-hover:text-[#0dd9ff]">📋 View Raw JSON Data</summary>
+              <pre className="bg-black/70 p-4 rounded-md overflow-x-auto text-[#0dd9ff] text-xs leading-relaxed mt-4">
+                {JSON.stringify(result, null, 2)}
+              </pre>
+            </details>
+
           </motion.div>
         )}
       </AnimatePresence>
