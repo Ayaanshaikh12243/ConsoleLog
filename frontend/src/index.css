@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  background-color: #0a0a0b;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+.glass-panel {
+  background: rgba(10, 10, 11, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+}
+
+.risk-glow-low { box-shadow: 0 0 20px rgba(0, 255, 136, 0.3); }
+.risk-glow-medium { box-shadow: 0 0 20px rgba(255, 204, 0, 0.3); }
+.risk-glow-high { box-shadow: 0 0 20px rgba(255, 61, 0, 0.3); }
+.risk-glow-critical { box-shadow: 0 0 20px rgba(136, 0, 255, 0.3); }
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.leaflet-container {
+  background: #0a0a0b !important;
+}
+
+.map-tiles-grayscale img,
+.leaflet-tile-pane img {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(110%) saturate(120%);
+}
