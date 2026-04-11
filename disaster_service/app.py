@@ -1,29 +1,30 @@
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-import os
 import io
 from PIL import Image
 import traceback
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import pathlib
 import json
 from datetime import datetime
 from dotenv import load_dotenv
 
 # --- CONFIG ---
-# Load .env from backend directory (parent of disaster_service or same root)
+# Load .env from backend directory
 env_path = os.path.join(os.path.dirname(__file__), '..', 'backend', '.env')
 load_dotenv(dotenv_path=env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    print("WARNING: GEMINI_API_KEY not found in .env")
-
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel("gemini-1.5-pro")
+client = genai.Client(api_key=GEMINI_API_KEY)
+# Use gemini-flash-latest which is verified working with this key
+MODEL_ID = "gemini-flash-latest"
 
 SYSTEM_PROMPT = """
 You are SENTINEL, an expert AI disaster analyst for infrastructure monitoring.
@@ -155,7 +156,10 @@ def analyze_report():
 
     try:
         prompt = f"{SYSTEM_PROMPT}\n\nREPORT:\n{data['report_text']}"
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=prompt
+        )
         result = parse_gemini_json(response.text)
         result["generated_at"] = datetime.utcnow().isoformat()
         return jsonify(result)
@@ -171,6 +175,7 @@ def analyze_document():
     file = request.files["file"]
     report_text = request.form.get("report_text", "No additional text provided.")
 
+    file_path = None
     try:
         # Save temp file
         temp_dir = os.path.join(os.path.dirname(__file__), "temp")
@@ -181,36 +186,52 @@ def analyze_document():
         path = pathlib.Path(file_path)
         
         if path.suffix.lower() == ".pdf":
-            uploaded = genai.upload_file(str(path), mime_type="application/pdf")
-            prompt = [
-                uploaded,
-                SYSTEM_PROMPT + f"\n\nREPORT TEXT:\n{report_text}\n\nAnalyze the disaster report in the uploaded PDF and text above."
-            ]
-            response = gemini_model.generate_content(prompt)
+            # For the new SDK, we can pass the path directly or use upload_file
+            # But simple text extraction or sending as part of prompt works too.
+            # Using media support in new SDK:
+            with open(file_path, "rb") as f:
+                pdf_data = f.read()
+            
+            prompt = f"{SYSTEM_PROMPT}\n\nREPORT TEXT:\n{report_text}\n\nAnalyze the disaster report in the attached PDF."
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[
+                    types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"),
+                    prompt
+                ]
+            )
         elif path.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
-            img = Image.open(file_path)
-            prompt = [
-                img,
-                SYSTEM_PROMPT + f"\n\nREPORT TEXT:\n{report_text}\n\nAnalyze the disaster image and text above."
-            ]
-            response = gemini_model.generate_content(prompt)
+            with open(file_path, "rb") as f:
+                img_data = f.read()
+            
+            prompt = f"{SYSTEM_PROMPT}\n\nREPORT TEXT:\n{report_text}\n\nAnalyze the disaster image and text above."
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[
+                    types.Part.from_bytes(data=img_data, mime_type="image/jpeg"), # handles most images
+                    prompt
+                ]
+            )
         else:
             # Fallback to reading as text
             content = path.read_text(encoding="utf-8", errors="ignore")
             prompt = f"{SYSTEM_PROMPT}\n\nREPORT:\n{content}"
-            response = gemini_model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=prompt
+            )
 
         result = parse_gemini_json(response.text)
         result["generated_at"] = datetime.utcnow().isoformat()
-        
-        # Cleanup
-        os.remove(file_path)
-        
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    finally:
+        # Cleanup
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=5000)
