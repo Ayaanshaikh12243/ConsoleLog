@@ -9,3 +9,4 @@ ENV/
 *.log
 stratum/reports/
 stratum/citizen_submissions/
+#
