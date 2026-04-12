@@ -73,6 +73,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"[STRATUM] Restored {len(saved)} alerts from MongoDB")
     except Exception as e:
         logger.warning(f"[STRATUM] Could not restore alerts: {e}")
+    # Restore submissions from DB on startup
+    try:
+        from .services.database import get_db
+        _db = await get_db()
+        saved_subs = await _db["submissions"].find().sort("_id", -1).limit(100).to_list(100)
+        for s in saved_subs:
+            s.pop("_id", None)  # remove non-serializable ObjectId
+        submissions_db.extend(saved_subs)
+        logger.info(f"[STRATUM] Restored {len(saved_subs)} submissions")
+    except Exception as e:
+        logger.warning(f"[STRATUM] Could not restore submissions: {e}")
     logger.info("[STRATUM] Autonomous monitor starting...")
     task = asyncio.create_task(autonomous_monitor())
     yield
@@ -275,6 +286,9 @@ SUBMISSION_DIR = Path("stratum/citizen_submissions")
 SUBMISSION_DIR.mkdir(parents=True, exist_ok=True)
 REPORTS_DIR = Path("stratum/reports")
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+SUBMISSIONS_DIR = Path("stratum/submissions")
+SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
+submissions_db = []
 
 app.add_middleware(
     CORSMiddleware,
@@ -1299,6 +1313,328 @@ async def get_contributor_reputation(contributor_id: str):
     except Exception as e:
         logger.error(f"Reputation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── CITIZEN SENTINEL ─────────────────────────────────────────────────────────
+
+async def call_disaster_service(photo_bytes: bytes, filename: str, description: str) -> dict:
+    """Call disaster_service Flask app on port 5050"""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Step 1: Keras image classification
+            keras_result = {}
+            files = {"file": (filename, photo_bytes, "image/jpeg")}
+            res = await client.post("http://localhost:5050/predict", files=files)
+            if res.status_code == 200:
+                keras_result = res.json()
+
+            # Step 2: Gemini vision analysis
+            gemini_result = {}
+            files2 = {"file": (filename, photo_bytes, "image/jpeg")}
+            data2  = {"report_text": description or "Citizen disaster report from field"}
+            res2   = await client.post("http://localhost:5050/analyze-document",
+                                       files=files2, data=data2)
+            if res2.status_code == 200:
+                gemini_result = res2.json()
+
+            return {"keras": keras_result, "gemini": gemini_result}
+    except Exception as e:
+        logger.warning(f"[DISASTER SERVICE] Unreachable: {e}")
+        return {"keras": {}, "gemini": {}}
+
+
+@app.post("/api/submit")
+async def citizen_submit(
+    lat: float = Form(...),
+    lng: float = Form(...),
+    description: str = Form(""),
+    event_type: str = Form(...),
+    photo: UploadFile = File(None)
+):
+    from .services.database import get_db
+
+    # 1. Save photo
+    photo_bytes    = None
+    photo_url      = None
+    photo_filename = None
+    if photo and photo.filename:
+        ext = photo.filename.rsplit(".", 1)[-1].lower() if "." in photo.filename else "jpg"
+        photo_filename = f"sub_{int(datetime.now().timestamp())}_{abs(int(lat*1000))}_{abs(int(lng*1000))}.{ext}"
+        photo_path     = SUBMISSIONS_DIR / photo_filename
+        photo_bytes    = await photo.read()
+        async with aiofiles.open(photo_path, "wb") as f:
+            await f.write(photo_bytes)
+        photo_url = f"/api/submissions/photo/{photo_filename}"
+
+    # 2. Reverse geocode
+    location = f"{lat:.3f}, {lng:.3f}"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            geo = await client.get(
+                f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json",
+                headers={"User-Agent": "STRATUM/1.0"}
+            )
+            location = geo.json().get("display_name", location)[:60]
+    except:
+        pass
+
+    # 3. USGS historical seismic data
+    historical_count = 0
+    historical_text  = "No historical seismic data"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            usgs = await client.get(
+                f"https://earthquake.usgs.gov/fdsnws/event/1/count?format=geojson"
+                f"&latitude={lat}&longitude={lng}&maxradiuskm=100&minmagnitude=3.0"
+                f"&starttime=2015-01-01&endtime=2026-01-01"
+            )
+            historical_count = usgs.json().get("count", 0)
+            historical_text  = f"{historical_count} seismic events (M3.0+) within 100km over last 10 years"
+    except:
+        pass
+
+    # 4. Call disaster service if photo provided
+    keras_prediction = None
+    keras_confidence = 0
+    gemini_analysis  = {}
+    if photo_bytes and photo_filename:
+        ds_result        = await call_disaster_service(photo_bytes, photo_filename, description)
+        keras_result     = ds_result.get("keras", {})
+        keras_prediction = keras_result.get("prediction")
+        keras_confidence = keras_result.get("confidence", 0)
+        gemini_analysis  = ds_result.get("gemini", {})
+
+    # ── Recent seismic activity (last 7 days) ──────────────────
+    recent_count        = 0
+    recent_quake_score  = 0
+    try:
+        seven_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S')
+        async with httpx.AsyncClient(timeout=6) as hc:
+            r = await hc.get(
+                f"https://earthquake.usgs.gov/fdsnws/event/1/count?format=geojson"
+                f"&latitude={lat}&longitude={lng}&maxradiuskm=150&minmagnitude=2.5"
+                f"&starttime={seven_ago}"
+            )
+            recent_count = r.json().get("count", 0)
+            if recent_count > 5:    recent_quake_score = 20
+            elif recent_count > 2:  recent_quake_score = 14
+            elif recent_count > 0:  recent_quake_score = 8
+    except:
+        pass
+
+    # ── Dynamic seismic zone score ─────────────────────────────
+    def get_seismic_zone_score(lat, lng, hist, recent):
+        # Derived from actual USGS data — works for ANY coords globally
+        if hist > 50:    base = 20
+        elif hist > 20:  base = 15
+        elif hist > 5:   base = 10
+        elif hist > 0:   base = 7
+        else:            base = 4
+        if recent > 5:   base = min(base + 5, 20)
+        elif recent > 0: base = min(base + 3, 20)
+        # India known hotspot overrides (BIS IS 1893:2016)
+        hotspots = [
+            (32, 38, 73, 80, 20),  # Kashmir / Himachal — Zone V
+            (25, 32, 88, 97, 20),  # Northeast India — Zone V
+            (10, 14, 92, 94, 20),  # Andaman — Zone V
+            (28, 32, 76, 82, 15),  # Delhi / Uttarakhand — Zone IV
+            (22, 28, 68, 74, 15),  # Gujarat — Zone IV
+            (24, 28, 80, 88, 15),  # Bihar / Jharkhand — Zone IV
+        ]
+        for (a, b, c, d, pts) in hotspots:
+            if a <= lat <= b and c <= lng <= d:
+                base = max(base, pts)
+                break
+        return base
+
+    zone_score = get_seismic_zone_score(lat, lng, historical_count, recent_count)
+
+    if zone_score >= 18:    zone_label = "Zone V (Very High)"
+    elif zone_score >= 13:  zone_label = "Zone IV (High)"
+    elif zone_score >= 8:   zone_label = "Zone III (Moderate)"
+    else:                   zone_label = "Zone II (Low)"
+
+    # ── 5. Credibility Score ───────────────────────────────────
+    # Signal 1: USGS 10yr history     → max 30 pts
+    # Signal 2: Seismic zone          → max 20 pts
+    # Signal 3: Keras model match     → max 30 pts
+    # Signal 4: Recent 7-day activity → max 20 pts
+    # Bonus:    description quality   → max  5 pts
+    score = 0
+
+    # Signal 1 — Historical 10yr (30 pts)
+    if event_type.upper() in ["EARTHQUAKE", "SEISMIC_DISTURBANCE"]:
+        if historical_count > 20:   score += 30
+        elif historical_count > 10: score += 22
+        elif historical_count > 3:  score += 14
+        elif historical_count > 0:  score += 7
+    else:
+        score += 10
+
+    # Signal 2 — Zone score (20 pts)
+    if event_type.upper() in ["EARTHQUAKE", "SEISMIC_DISTURBANCE"]:
+        score += zone_score
+    else:
+        score += zone_score // 2
+
+    # Signal 3 — Keras model (30 pts)
+    if keras_prediction:
+        event_map = {
+            "FLOOD": "flood", "EARTHQUAKE": "earthquake",
+            "CYCLONE": "cyclone", "FIRE": "wildfire",
+            "LANDSLIDE": "earthquake", "OTHER": ""
+        }
+        expected  = event_map.get(event_type.upper(), "")
+        norm_conf = min(float(keras_confidence), 100) / 100.0
+        if keras_prediction == expected:
+            score += int(norm_conf * 30)
+        else:
+            score += int(norm_conf * 8)
+
+    # Signal 4 — Recent 7 days (20 pts)
+    if event_type.upper() in ["EARTHQUAKE", "SEISMIC_DISTURBANCE"]:
+        score += recent_quake_score
+    else:
+        score += recent_quake_score // 2
+
+    # Bonus — description quality (5 pts)
+    if len(description) > 10: score += 3
+    if len(description) > 40: score += 2
+
+    score = min(score, 100)
+
+    historical_text = (
+        f"{historical_count} seismic events (M3.0+) within 100km over 10 years | "
+        f"Seismic classification: {zone_label} | "
+        f"Recent 7-day activity: {recent_count} events near location"
+    )
+
+    # 6. Verdict
+    if score >= 60:
+        verdict = "HIGH_CREDIBILITY"
+        status  = "AUTO_ALERTED"
+    elif score >= 30:
+        verdict = "UNDER_REVIEW"
+        status  = "PENDING"
+    else:
+        verdict = "LOW_CREDIBILITY"
+        status  = "REJECTED"
+
+    # 7. Build record
+    sub_id     = f"sub_{int(datetime.now().timestamp())}_{abs(int(lat*100))}"
+    submission = {
+        "id":               sub_id,
+        "lat":              lat,
+        "lng":              lng,
+        "location":         location,
+        "description":      description,
+        "event_type":       event_type,
+        "photo_url":        photo_url,
+        "credibility":      score,
+        "verdict":          verdict,
+        "status":           status,
+        "historical_text":  historical_text,
+        "historical_count": historical_count,
+        "keras_prediction": keras_prediction,
+        "keras_confidence": keras_confidence,
+        "gemini_severity":  gemini_analysis.get("severity"),
+        "gemini_summary":   gemini_analysis.get("summary"),
+        "submitted_at":     datetime.now().isoformat()
+    }
+
+    # 8. Auto-alert if high credibility
+    if score >= 60:
+        cell_id = h3.latlng_to_cell(lat, lng, 7)
+        generate_alert(
+            cell_id=cell_id,
+            risk=min(score, 85),
+            status="WARNING",
+            cause=f"Citizen Sentinel: {description[:80] or event_type}",
+            location=location,
+            trigger=event_type
+        )
+
+    submissions_db.insert(0, submission)
+    _db = await get_db()
+    asyncio.create_task(_db["submissions"].insert_one(dict(submission)))
+
+    return {
+        "success":          True,
+        "credibility":      score,
+        "verdict":          verdict,
+        "status":           status,
+        "historical_text":  historical_text,
+        "location":         location,
+        "keras_prediction": keras_prediction,
+        "keras_confidence": keras_confidence,
+    }
+
+
+@app.get("/api/submissions")
+async def get_submissions():
+    def _clean(doc: dict) -> dict:
+        """Strip MongoDB ObjectId and any other non-JSON-serializable fields."""
+        out = {}
+        for k, v in doc.items():
+            if k == "_id":
+                continue          # drop _id entirely
+            try:
+                # ObjectId and similar types have no clean str conversion via json;
+                # convert anything that isn't a basic type to str
+                if isinstance(v, (str, int, float, bool, list, dict, type(None))):
+                    out[k] = v
+                else:
+                    out[k] = str(v)
+            except Exception:
+                out[k] = str(v)
+        return out
+
+    return [_clean(s) for s in submissions_db[:100]]
+
+
+@app.get("/api/submissions/photo/{filename}")
+async def get_submission_photo(filename: str):
+    path = SUBMISSIONS_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(str(path))
+
+
+@app.post("/api/submissions/{sub_id}/approve")
+async def approve_submission(sub_id: str):
+    from .services.database import get_db
+    for s in submissions_db:
+        if s["id"] == sub_id:
+            s["status"] = "APPROVED"
+            cell_id = h3.latlng_to_cell(s["lat"], s["lng"], 7)
+            generate_alert(
+                cell_id=cell_id,
+                risk=min(s["credibility"], 85),
+                status="WARNING",
+                cause=f"Admin verified: {s['description'][:80] or s['event_type']}",
+                location=s["location"],
+                trigger=s["event_type"]
+            )
+            _db = await get_db()
+            asyncio.create_task(_db["submissions"].update_one(
+                {"id": sub_id}, {"$set": {"status": "APPROVED"}}
+            ))
+            return {"success": True}
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/api/submissions/{sub_id}/reject")
+async def reject_submission(sub_id: str):
+    from .services.database import get_db
+    for s in submissions_db:
+        if s["id"] == sub_id:
+            s["status"] = "REJECTED"
+            _db = await get_db()
+            asyncio.create_task(_db["submissions"].update_one(
+                {"id": sub_id}, {"$set": {"status": "REJECTED"}}
+            ))
+            return {"success": True}
+    raise HTTPException(status_code=404, detail="Not found")
+
 
 if __name__ == "__main__":
     import uvicorn

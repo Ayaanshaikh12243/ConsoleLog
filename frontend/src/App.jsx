@@ -11,42 +11,52 @@ import UploadsPage from './pages/UploadsPage';
 import AlertsPage from './pages/AlertsPage';
 import AlertToast from './components/AlertToast';
 import SubmissionDashboard from './components/SubmissionDashboard';
+import SubmissionsPage from './pages/SubmissionsPage';
+import AdminSubmissionsPage from './pages/AdminSubmissionsPage';
 
 function App() {
   return (
     <Router>
-      <div className="h-screen w-screen bg-stratum-dark text-white overflow-hidden flex flex-col font-inter">
-        <Header />
-        
-        <div className="flex-1 flex overflow-hidden">
-          <Sidebar />
-          
-          <main className="flex-1 h-full relative overflow-y-auto custom-scrollbar bg-stratum-dark">
-            <Routes>
-              <Route path="/" element={<MapPage />} />
-              <Route path="/alerts" element={<AlertsPage />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/uploads" element={<UploadsPage />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/submissions" element={<SubmissionDashboard />} />
-            </Routes>
-          </main>
-        </div>
+      {/* Standalone citizen submission page — no sidebar/navbar */}
+      <Routes>
+        <Route path="/submit" element={<SubmissionsPage />} />
 
-        {/* Ticker Bottom Bar */}
-        <footer className="h-8 glass-panel border-t border-white/5 flex items-center px-4 z-50 overflow-hidden">
-          <div className="flex items-center space-x-6 text-[10px] font-mono tracking-wider whitespace-nowrap">
-            <span className="text-white/40">NODE-ID: ALPHA</span>
-            <span className="text-white/40">|</span>
-            <span className="text-stratum-accent uppercase">Fleet Status: Operational</span>
+        {/* All other pages use the full dashboard layout */}
+        <Route path="*" element={
+          <div className="h-screen w-screen bg-stratum-dark text-white overflow-hidden flex flex-col font-inter">
+            <Header />
+
+            <div className="flex-1 flex overflow-hidden">
+              <Sidebar />
+
+              <main className="flex-1 h-full relative overflow-y-auto custom-scrollbar bg-stratum-dark">
+                <Routes>
+                  <Route path="/" element={<MapPage />} />
+                  <Route path="/alerts" element={<AlertsPage />} />
+                  <Route path="/analytics" element={<AnalyticsPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/uploads" element={<UploadsPage />} />
+                  <Route path="/history" element={<HistoryPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/submissions" element={<AdminSubmissionsPage />} />
+                </Routes>
+              </main>
+            </div>
+
+            {/* Ticker Bottom Bar */}
+            <footer className="h-8 glass-panel border-t border-white/5 flex items-center px-4 z-50 overflow-hidden">
+              <div className="flex items-center space-x-6 text-[10px] font-mono tracking-wider whitespace-nowrap">
+                <span className="text-white/40">NODE-ID: ALPHA</span>
+                <span className="text-white/40">|</span>
+                <span className="text-stratum-accent uppercase">Fleet Status: Operational</span>
+              </div>
+            </footer>
+
+            {/* Alert Toast Notifications */}
+            <AlertToast />
           </div>
-        </footer>
-
-        {/* Alert Toast Notifications */}
-        <AlertToast />
-      </div>
+        } />
+      </Routes>
     </Router>
   );
 }
