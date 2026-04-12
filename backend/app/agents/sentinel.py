@@ -1,70 +1,107 @@
 from .base import BaseAgent
 import numpy as np
-import torch
-import torch.nn as nn
-from pathlib import Path
 import logging
 
 logger = logging.getLogger("STRATUM-Agent")
 
-class SentinelLSTM(nn.Module):
-    def __init__(self):
-        super(SentinelLSTM, self).__init__()
-        self.encoder = nn.LSTM(input_size=6, hidden_size=64, num_layers=2, batch_first=True)
-        self.enc_fc = nn.Linear(64, 16)
-        self.head = nn.Sequential(
-            nn.Linear(16, 32),
-            nn.ReLU(),
-            nn.Dropout(0.2), # Placeholder, has no trained weights
-            nn.Linear(32, 16),
-            nn.ReLU(),
-            nn.Linear(16, 1)
-        )
-
-    def forward(self, x):
-        _, (hn, _) = self.encoder(x)
-        # Use the hidden state of the last LSTM layer
-        x = hn[-1]
-        x = torch.relu(self.enc_fc(x))
-        x = self.head(x)
-        return torch.sigmoid(x) # Output anomaly probability 0.0 to 1.0
 
 class SentinelAgent(BaseAgent):
+    """
+    Statistical anomaly detection using Z-scores.
+    No ML model needed — pure math on real baseline data.
+    """
     def __init__(self, h3_index: str):
         super().__init__(f"SENTINEL-{h3_index}")
         self.h3_index = h3_index
-        self.baseline = {} # 90-day baseline data
-        
-        self.model = SentinelLSTM()
-        try:
-            model_path = Path("C:/Users/harsh/OneDrive/Desktop/Airavat_ConsoleLog/models-main/sentinel_classifier.pth")
-            self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
-            self.model.eval()
-            logger.info("SENTINEL PyTorch model loaded successfully.")
-        except Exception as e:
-            logger.error(f"Failed to load SENTINEL model: {e}")
+        # Store rolling 90-day baseline per signal
+        # Structure: {"rainfall": [list of values], "temp": [...], ...}
+        self.baseline_window = {
+            "rainfall": [], "temp": [], "humidity": [],
+            "soil_moisture": [], "seismic_mag": [], "ndvi": []
+        }
+        self.MIN_BASELINE_POINTS = 3  # minimum readings before z-score is valid
+
+    def update_baseline(self, telemetry: dict):
+        """Add new reading to rolling baseline window (max 90 days = 90 points)"""
+        MAX_WINDOW = 90
+        for key in self.baseline_window:
+            val = telemetry.get(key)
+            if val is not None:
+                self.baseline_window[key].append(float(val))
+                if len(self.baseline_window[key]) > MAX_WINDOW:
+                    self.baseline_window[key].pop(0)
+
+    def compute_z_score(self, signal_name: str, current_value: float) -> float:
+        """
+        Z = (current - mean) / std_dev
+        Returns 0.0 if not enough baseline data yet.
+        """
+        history = self.baseline_window[signal_name]
+        if len(history) < self.MIN_BASELINE_POINTS:
+            return 0.0
+        mean = sum(history) / len(history)
+        variance = sum((x - mean) ** 2 for x in history) / len(history)
+        std = variance ** 0.5
+        if std < 0.001:  # avoid division by near-zero
+            return 0.0
+        return (current_value - mean) / std
 
     async def process(self, telemetry: dict) -> dict:
-        # Extract features (fallback to 0.0 if missing)
-        # Assuming order: ndvi, soil_moisture, temperature, rainfall, humidity, seismic
-        features = [
-            telemetry.get("ndvi", 0.5),
-            telemetry.get("soil_moisture", 0.2),
-            telemetry.get("temperature", 25.0),
-            telemetry.get("rainfall", 0.0),
-            telemetry.get("humidity", 60.0),
-            telemetry.get("seismic_mag", 0.0)
-        ]
-        
-        # LSTM expects shape: (batch_size, sequence_length, features)
-        # We only have a snapshot here, so we'll treat it as a sequence of length 1
-        tensor_input = torch.tensor([features], dtype=torch.float32).unsqueeze(0)
-        
-        with torch.no_grad():
-            anomaly_score = self.model(tensor_input).item()
-            
-        if anomaly_score > 0.5:
-            self.log_action("ANOMALY DETECTED", f"Model confidence: {anomaly_score:.3f}")
-            return {"cell_id": self.h3_index, "type": "Multi-Factor ML Risk", "severity": anomaly_score}
-            
-        return {"cell_id": self.h3_index, "type": "Normal", "severity": anomaly_score}
+        """
+        Detect multivariate anomaly using z-scores across all signals.
+        Escalates if:
+        - Any single signal z-score > 3.0 (severe single anomaly)
+        - 2+ signals have z-score > 2.0 (correlated multi-signal anomaly)
+        """
+        # Update baseline with this reading
+        self.update_baseline(telemetry)
+
+        # Compute z-scores for all signals
+        signals = {}
+        for key in self.baseline_window:
+            current = telemetry.get(key, 0.0)
+            z = self.compute_z_score(key, float(current))
+            signals[key] = {
+                "current": current,
+                "z_score": round(z, 3),
+                "anomalous": z > 2.0 if key in ("rainfall", "humidity", "soil_moisture") else abs(z) > 2.0
+            }
+
+        # Anomaly decision rules
+        max_z = max(abs(s["z_score"]) for s in signals.values())
+        anomalous_signals = [k for k, v in signals.items() if v["anomalous"]]
+        num_anomalous = len(anomalous_signals)
+
+        # Escalation logic
+        escalate = False
+        escalation_reason = "NORMAL"
+
+        if max_z > 3.0:
+            escalate = True
+            escalation_reason = "SEVERE_SINGLE_SIGNAL"
+        elif num_anomalous >= 2:
+            escalate = True
+            escalation_reason = "CORRELATED_MULTI_SIGNAL"
+
+        # Confidence = normalized combination of z-score and signal count
+        confidence = round(
+            min((max_z / 4.0) * 0.6 + (num_anomalous / 6.0) * 0.4, 1.0), 3
+        )
+
+        if escalate:
+            self.log_action(
+                "ANOMALY ESCALATED",
+                f"max_z={max_z:.2f}, signals={anomalous_signals}, reason={escalation_reason}"
+            )
+
+        return {
+            "cell_id": self.h3_index,
+            "escalate": escalate,
+            "escalation_reason": escalation_reason,
+            "max_z_score": round(max_z, 3),
+            "anomalous_signals": anomalous_signals,
+            "num_anomalous": num_anomalous,
+            "confidence": confidence,
+            "signals": signals,
+            "type": "ANOMALY" if escalate else "Normal"
+        }

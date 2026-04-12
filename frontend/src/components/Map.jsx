@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, CircleMarker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polygon, Popup, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import axios from 'axios';
+import * as h3 from 'h3-js';
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -17,7 +18,16 @@ const RISK_COLOR = (risk) => {
   return '#00f2ff';
 };
 
-// ── Click Handler ──────────────────────────────────────────────────────────
+// Convert H3 cell ID → Leaflet polygon boundary
+const h3ToPolygon = (h3Index) => {
+  try {
+    const boundary = h3.cellToBoundary(h3Index); // [[lat,lng], ...]
+    return boundary; // already [lat, lng] format for Leaflet
+  } catch {
+    return null;
+  }
+};
+
 const ClickHandler = ({ setLocation }) => {
   useMapEvents({
     click(e) {
@@ -28,7 +38,6 @@ const ClickHandler = ({ setLocation }) => {
   return null;
 };
 
-// ── Viewport Scanner ───────────────────────────────────────────────────────
 const ViewportScanner = ({ scanActive, onScanResult }) => {
   const map = useMap();
   const scanRef = useRef(null);
@@ -44,22 +53,19 @@ const ViewportScanner = ({ scanActive, onScanResult }) => {
     try {
       const res = await axios.get(`${API_BASE}/scan`, { params });
       if (res.data?.cells) onScanResult(res.data.cells);
-    } catch (e) {
-      // silently skip on error
-    }
+    } catch (e) {}
   }, [map, onScanResult]);
 
   useEffect(() => {
     if (scanActive) {
-      doScan(); // immediate first scan
-      scanRef.current = setInterval(doScan, 15000); // then every 15s
+      doScan();
+      scanRef.current = setInterval(doScan, 15000);
     } else {
       clearInterval(scanRef.current);
     }
     return () => clearInterval(scanRef.current);
   }, [scanActive, doScan]);
 
-  // Also scan when map moves (with debounce)
   useMapEvents({
     moveend() {
       if (scanActive) {
@@ -70,6 +76,43 @@ const ViewportScanner = ({ scanActive, onScanResult }) => {
   });
 
   return null;
+};
+
+// ── Single H3 Hex Cell ─────────────────────────────────────────────────────
+const HexCell = ({ cell, setLocation, isNeighbor = false }) => {
+  const boundary = h3ToPolygon(cell.node_id);
+  if (!boundary) return null;
+
+  const color = RISK_COLOR(cell.risk);
+  const opacity = isNeighbor ? 0.12 : 0.22;
+  const weight = isNeighbor ? 1 : 1.8;
+
+  return (
+    <Polygon
+      positions={boundary}
+      pathOptions={{
+        color: color,
+        fillColor: color,
+        fillOpacity: opacity,
+        weight: weight,
+        dashArray: isNeighbor ? '4 4' : null,
+      }}
+      eventHandlers={{
+        click: () => !isNeighbor && setLocation({ lat: cell.lat, lng: cell.lng }),
+      }}
+    >
+      {!isNeighbor && (
+        <Popup className="stratum-popup">
+          <div style={{ color: '#000', fontSize: '11px', fontWeight: 'bold' }}>
+            <div style={{ color }}>⬡ {cell.node_id?.substring(0, 10)}…</div>
+            <div>Risk: {cell.risk}% — {cell.status}</div>
+            {cell.alert_type && <div style={{ color: '#ff6b35' }}>⚠ {cell.alert_type}</div>}
+            <div style={{ opacity: 0.7 }}>{cell.cause?.substring(0, 60)}</div>
+          </div>
+        </Popup>
+      )}
+    </Polygon>
+  );
 };
 
 // ── Main Map Component ─────────────────────────────────────────────────────
@@ -86,7 +129,6 @@ const Map = ({ setLocation, location, scanActive, onScanResult, scannedCells }) 
         scrollWheelZoom={true}
         style={{ height: '100%', width: '100%', background: '#0a0a0b' }}
       >
-        {/* OSM tiles with dark invert filter — rich premium dark look */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -96,37 +138,31 @@ const Map = ({ setLocation, location, scanActive, onScanResult, scannedCells }) 
         <ClickHandler setLocation={setLocation} />
         <ViewportScanner scanActive={scanActive} onScanResult={onScanResult} />
 
-        {/* Clicked location marker */}
         {location && <Marker position={[location.lat, location.lng]} />}
 
-        {/* Auto-scanned cells as colored hex circles */}
+        {/* Primary scanned cells as H3 hexagons */}
         {scannedCells.map((cell) => (
-          <CircleMarker
-            key={cell.node_id}
-            center={[cell.lat, cell.lng]}
-            radius={14}
-            pathOptions={{
-              color: RISK_COLOR(cell.risk),
-              fillColor: RISK_COLOR(cell.risk),
-              fillOpacity: 0.25,
-              weight: 1.5,
-            }}
-            eventHandlers={{
-              click: () => setLocation({ lat: cell.lat, lng: cell.lng }),
-            }}
-          >
-            <Popup className="stratum-popup">
-              <div style={{ color: '#000', fontSize: '11px', fontWeight: 'bold' }}>
-                <div style={{ color: RISK_COLOR(cell.risk) }}>⬡ {cell.node_id?.substring(0, 10)}…</div>
-                <div>Risk: {cell.risk}% — {cell.status}</div>
-                <div style={{ opacity: 0.7 }}>{cell.cause?.substring(0, 60)}</div>
-              </div>
-            </Popup>
-          </CircleMarker>
+          <HexCell key={cell.node_id} cell={cell} setLocation={setLocation} />
         ))}
+
+        {/* Impacted neighbor nodes — dashed lower-opacity hexagons */}
+        {scannedCells.flatMap((cell) =>
+          (cell.impacted_nodes || []).map((neighbor) => (
+            <HexCell
+              key={`neighbor-${neighbor.node_id}`}
+              cell={{
+                node_id: neighbor.node_id,
+                lat: cell.lat,   // approximate — neighbors render from H3 boundary directly
+                lng: cell.lng,
+                risk: neighbor.risk,
+              }}
+              setLocation={setLocation}
+              isNeighbor={true}
+            />
+          ))
+        )}
       </MapContainer>
 
-      {/* Overlay vignette */}
       <div className="absolute inset-0 pointer-events-none border border-white/5 z-10 shadow-[inset_0_0_100px_rgba(0,0,0,0.5)]" />
     </div>
   );

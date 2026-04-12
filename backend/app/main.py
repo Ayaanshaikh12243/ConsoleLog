@@ -25,9 +25,205 @@ from .ml.video_real_time_processor import VideoRealtimeProcessor
 from .ml.contributor_trust_bayesian import ContributorTrustBayesian
 from .utils.logger import setup_logger
 from fastapi import Form, HTTPException
+from .agents.sentinel import SentinelAgent
+from .agents.intelligence import ProbeAgent, VeritasAgent, OracleAgent
+from .agents.meta import ScribeAgent
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="STRATUM — Autonomous Planetary Intelligence")
+INDIA_MONITOR_ZONES = [
+    (19.0596, 72.8656),   # Mumbai
+    (28.6139, 77.2090),   # Delhi
+    (13.0827, 80.2707),   # Chennai
+    (22.5726, 88.3639),   # Kolkata
+    (17.3850, 78.4867),   # Hyderabad
+    (30.3165, 78.0322),   # Uttarakhand (seismic zone V)
+    (34.0837, 74.7973),   # Kashmir (seismic zone V)
+    (23.0225, 72.5714),   # Ahmedabad
+    (21.1458, 79.0882),   # Nagpur
+    (25.5941, 85.1376),   # Patna (flood zone)
+]
 
+async def autonomous_monitor():
+    await asyncio.sleep(12)
+    while True:
+        try:
+            zones = random.sample(INDIA_MONITOR_ZONES, 3)
+            for lat, lng in zones:
+                try:
+                    result = await run_cell_pipeline(lat, lng)
+                    if result and result.get("risk", 0) > 35:
+                        logger.info(f"[AUTO-MONITOR] Alert fired: {result.get('location')} risk={result.get('risk')}%")
+                except Exception as e:
+                    logger.warning(f"[AUTO-MONITOR] Zone scan error {lat},{lng}: {e}")
+                await asyncio.sleep(4)
+        except Exception as e:
+            logger.error(f"[AUTO-MONITOR] Cycle error: {e}")
+        await asyncio.sleep(90)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("[STRATUM] Loading alerts from MongoDB...")
+    # Restore alerts from DB on startup
+    try:
+        saved = await get_all_alerts_from_db()
+        alerts_db.extend(saved)
+        logger.info(f"[STRATUM] Restored {len(saved)} alerts from MongoDB")
+    except Exception as e:
+        logger.warning(f"[STRATUM] Could not restore alerts: {e}")
+    logger.info("[STRATUM] Autonomous monitor starting...")
+    task = asyncio.create_task(autonomous_monitor())
+    yield
+    task.cancel()
+    logger.info("[STRATUM] Monitor stopped.")
+
+app = FastAPI(
+    title="STRATUM — Autonomous Planetary Intelligence",
+    lifespan=lifespan
+)
+
+import json
+from fastapi.responses import StreamingResponse
+
+from fpdf import FPDF
+from fastapi.responses import FileResponse
+import tempfile
+
+@app.get("/api/report/{node_id}/pdf")
+async def download_pdf_report(node_id: str):
+    """Generate and download a PDF intelligence report for a cell."""
+
+    # Pull latest cell data from MongoDB
+    from .services.database import get_cell_by_id
+    cell = await get_cell_by_id(node_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    pipeline = cell.get("agent_pipeline") or cell.get("alert") or {}
+    seismic  = cell.get("seismic", {})
+    nasa     = cell.get("nasa", {})
+
+    # ── Build PDF ─────────────────────────────────────────────
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    # Header bar
+    pdf.set_fill_color(10, 10, 11)
+    pdf.rect(0, 0, 210, 30, 'F')
+    pdf.set_text_color(0, 242, 255)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_xy(20, 8)
+    pdf.cell(0, 12, "STRATUM — PLANETARY INTELLIGENCE REPORT", ln=True)
+
+    pdf.set_text_color(150, 150, 150)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_xy(20, 20)
+    pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}  |  Node: {node_id}", ln=True)
+
+    pdf.ln(8)
+
+    # ── Section: Risk Summary ──────────────────────────────────
+    def section_title(title):
+        pdf.set_fill_color(20, 20, 22)
+        pdf.set_text_color(0, 242, 255)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 8, f"  {title}", ln=True, fill=True)
+        pdf.ln(3)
+
+    def row(label, value, highlight=False):
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(55, 7, label.upper(), ln=False)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(220, 220, 220) if not highlight else pdf.set_text_color(255, 80, 50)
+        pdf.cell(0, 7, str(value), ln=True)
+
+    pdf.set_fill_color(255, 255, 255)
+
+    section_title("RISK ASSESSMENT")
+    row("Location",      cell.get("location", "Unknown"))
+    row("Risk Index",    f"{cell.get('risk', 0)}%",     highlight=cell.get('risk', 0) > 50)
+    row("Status",        cell.get("status", "—"),       highlight=cell.get('status') in ['CRITICAL','WARNING'])
+    row("Alert Type",    cell.get("alert_type", "—"))
+    row("Disaster Type", pipeline.get("disaster_type", "—"))
+    row("Severity",      pipeline.get("severity", pipeline.get("confidence", "—")))
+    pdf.ln(4)
+
+    section_title("ORACLE MONTE CARLO FORECAST")
+    row("VERITAS Confidence", f"{pipeline.get('confidence', '—')}%")
+    row("30-Day Risk",  f"{round((pipeline.get('forecast_30d',  0) or 0) * 100, 1)}%")
+    row("90-Day Risk",  f"{round((pipeline.get('forecast_90d',  0) or 0) * 100, 1)}%")
+    row("180-Day Risk", f"{round((pipeline.get('forecast_180d', 0) or 0) * 100, 1)}%")
+    row("Cost if Unaddressed", f"INR {pipeline.get('cost_crores', 0)} Crore")
+    pdf.ln(4)
+
+    section_title("LIVE SENSOR DATA (NASA POWER)")
+    row("Temperature",   f"{nasa.get('temp', '—')} °C")
+    row("Humidity",      f"{nasa.get('humidity', '—')} %")
+    row("Rainfall",      f"{nasa.get('rainfall', '—')} mm/day")
+    row("Data Source",   nasa.get("source", "NASA POWER"))
+    pdf.ln(4)
+
+    if seismic.get("mag"):
+        section_title("SEISMIC EVENT (USGS)")
+        row("Magnitude",  f"M{seismic.get('mag')}")
+        row("Depth",      f"{seismic.get('depth_km')} km")
+        row("Location",   seismic.get("place", "—"))
+        row("Time",       str(datetime.fromtimestamp(seismic['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')) if seismic.get('time') else "—")
+        pdf.ln(4)
+
+    section_title("MINISTER BRIEF")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(200, 200, 200)
+    pdf.multi_cell(0, 6, pipeline.get("minister_brief") or cell.get("cause") or "No brief available.")
+    pdf.ln(4)
+
+    section_title("ENGINEER BRIEF (STRATUM PROBE)")
+    pdf.set_font("Courier", "", 8)
+    pdf.set_text_color(180, 180, 180)
+    pdf.multi_cell(0, 5, pipeline.get("engineer_brief") or "No technical brief available.")
+    pdf.ln(4)
+
+    # Footer
+    pdf.set_y(-20)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 5, "STRATUM — Autonomous Planetary Disaster Intelligence System | ConsoleLog Team | Confidential", align="C")
+
+    # ── Save & Return ──────────────────────────────────────────
+    filename = f"STRATUM-Report-{node_id[:8]}.pdf"
+    filepath = REPORTS_DIR / filename
+    pdf.output(str(filepath))
+
+    return FileResponse(
+        path=str(filepath),
+        filename=filename,
+        media_type="application/pdf"
+    )
+
+@app.get("/api/alerts/stream")
+async def alert_stream():
+    """Server-Sent Events — pushes new alerts to frontend in real time."""
+    async def event_generator():
+        last_count = 0
+        while True:
+            current = alerts_db[:10]
+            if len(current) != last_count:
+                new_alerts = current[:len(current) - last_count]
+                for alert in reversed(new_alerts):
+                    yield f"data: {json.dumps(alert)}\n\n"
+                last_count = len(current)
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 # Initialize processing systems
 audio_baseline = AudioSelfSupervisedBaseline()
 video_processor = VideoRealtimeProcessor()
@@ -50,6 +246,18 @@ app.add_middleware(
 baseline_db = defaultdict(list)
 cell_metadata = {}
 G = nx.Graph()
+
+# Agent registry — one SENTINEL per cell, shared PROBE/VERITAS/ORACLE/SCRIBE
+_sentinel_agents = {}  # cell_id -> SentinelAgent
+_probe   = ProbeAgent()
+_veritas = VeritasAgent()
+_oracle  = OracleAgent()
+_scribe  = ScribeAgent()
+
+def get_sentinel(cell_id: str) -> SentinelAgent:
+    if cell_id not in _sentinel_agents:
+        _sentinel_agents[cell_id] = SentinelAgent(cell_id)
+    return _sentinel_agents[cell_id]
 
 # ── H3 HELPERS ─────────────────────────────────────────────────────────────
 
@@ -118,7 +326,12 @@ def generate_alert(cell_id, risk, status, cause, location="Unknown Sector", trig
             "time": datetime.now().isoformat()
         }
         # Avoid duplicate alerts for the same cell in a short window
-        if not any(a["cell"] == cell_id and (datetime.now() - datetime.fromisoformat(a["time"])).seconds < 3600 for a in alerts_db[-5:]):
+        already_exists = any(
+        a["cell"] == cell_id and
+        (datetime.now() - datetime.fromisoformat(a["time"])).total_seconds() < 3600
+        for a in alerts_db          # check ALL alerts, not just last 5
+        )
+        if not already_exists:
             alerts_db.insert(0, alert)
             asyncio.create_task(save_alert(alert))
             return alert
@@ -141,33 +354,62 @@ def detect_anomaly(current, history):
 def find_cause(type, ndvi, rainfall, seismic_mag, temp, wind, soil):
     return get_alert_explanation(type, rainfall, ndvi, seismic_mag, wind)
 
-def simulate_risk(rainfall, temp, seismic_mag, humidity):
-    """Tiered environmental risk model. Returns 5–99%."""
-    score = 15  # minimum baseline
-    # Rainfall (dominant, 0–45 pts)
-    if rainfall > 25:   score += 45
-    elif rainfall > 15: score += 35
-    elif rainfall > 8:  score += 25
-    elif rainfall > 4:  score += 15
-    elif rainfall > 1:  score += 7
-    # Seismic (0–35 pts)
-    if seismic_mag >= 5.0:   score += 35
-    elif seismic_mag >= 4.0: score += 25
-    elif seismic_mag >= 3.0: score += 15
-    elif seismic_mag >= 2.0: score += 8
-    elif seismic_mag >= 1.0: score += 3
-    # Temperature extremes (0–20 pts)
-    if temp > 42 or temp < -15:   score += 20
-    elif temp > 37 or temp < -5:  score += 12
-    elif temp > 32 or temp < 5:   score += 6
-    # Humidity extremes (0–10 pts)
-    if humidity > 88:  score += 10
-    elif humidity > 78: score += 5
-    elif humidity < 15: score += 8
-    score += random.uniform(-4, 7)
-    return round(max(5, min(99, score)), 1)
+def simulate_risk(rainfall, temp, seismic_mag, humidity,
+                  baseline_rainfall=None, baseline_temp=None,
+                  baseline_humidity=None):
+    """
+    Deterministic risk scoring using weighted signal contributions.
+    No random values. Every output is reproducible and explainable.
+
+    Weights based on STRATUM PS signal importance:
+    - Rainfall/moisture: 40% weight (primary flood indicator)
+    - Temperature anomaly: 20% weight
+    - Seismic activity: 25% weight
+    - Humidity anomaly: 15% weight
+    """
+
+    # Use baselines if provided, else use climatological defaults
+    # These defaults are conservative mid-range values, not tuned for any zone
+    b_rain = baseline_rainfall if baseline_rainfall else 8.0   # mm/day
+    b_temp = baseline_temp if baseline_temp else 28.0           # celsius
+    b_hum  = baseline_humidity if baseline_humidity else 65.0   # percent
+
+    # Compute deviations as percentage above baseline
+    rain_dev = max((rainfall - b_rain) / max(b_rain, 1.0), 0)
+    temp_dev = max((temp - b_temp) / max(b_temp, 1.0), 0)
+    hum_dev  = max((humidity - b_hum) / max(b_hum, 1.0), 0)
+
+    # Seismic score — logarithmic scale (Richter is logarithmic)
+    # mag 0-2: negligible, 2-3: low, 3-4: moderate, 4+: high
+    seismic_score = 0
+    if seismic_mag > 0:
+        seismic_score = min((math.log10(max(seismic_mag, 0.1) + 1) / math.log10(6)) * 100, 100)
+
+    # Weighted combination — all components 0-100 range
+    rain_score = min(rain_dev * 150, 100)    # 1.5x deviation = max score
+    temp_score = min(temp_dev * 200, 100)    # 2x deviation = max score
+    hum_score  = min(hum_dev * 200, 100)     # 2x deviation = max score
+
+    # Final weighted score
+    raw_score = (
+        rain_score    * 0.40 +
+        seismic_score * 0.25 +
+        temp_score    * 0.20 +
+        hum_score     * 0.15
+    )
+
+    # Floor at 5 (never show 0% risk), ceiling at 99
+    return round(max(5.0, min(99.0, raw_score)), 1)
 
 # ── CORE INTELLIGENCE PIPELINE ──────────────────────────────────────────────
+import h3
+
+def get_impacted_nodes(node_id: str, risk: float) -> list:
+    if risk < 30:
+        return []
+    ring = 1 if risk < 60 else 2
+    neighbors = [n for n in h3.grid_disk(node_id, ring) if n != node_id]
+    return [{"node_id": n, "risk": round(risk * 0.75, 1)} for n in neighbors]
 
 async def run_cell_pipeline(lat: float, lng: float):
     """
@@ -208,7 +450,70 @@ async def run_cell_pipeline(lat: float, lng: float):
     
     # 2. Estimate Risk
     forecast_risk = simulate_risk(rainfall_f, temp_f, seismic_f, humidity_f)
-    if alert_type != "NORMAL": forecast_risk = max(forecast_risk, 45.0)
+
+    # 2b. Run 5-Agent Pipeline if anomaly detected
+    agent_output = None
+    if True:
+        try:
+                        # Pre-warm SENTINEL with climatological normals (NOT live data)
+            sentinel_agent = get_sentinel(cell_id)
+            NORMAL_BASELINE = {
+                "rainfall": 8.0, "temp": 28.0, "humidity": 65.0,
+                "soil_moisture": 0.4, "ndvi": 0.5, "seismic_mag": 0.5
+            }
+            for _ in range(5):
+                await sentinel_agent.process(NORMAL_BASELINE)
+
+            telemetry = {
+                "rainfall":      rainfall_f,
+                "temp":          temp_f,
+                "humidity":      humidity_f,
+                "soil_moisture": soil_f,
+                "ndvi":          ndvi_f,
+                "seismic_mag":   seismic_f,
+                "days_elevated": len(baseline_db.get(cell_id, [])) // 6
+            }
+            # # Build telemetry dict for agents
+            # telemetry = {
+            #     "rainfall":      rainfall_f,
+            #     "temp":          temp_f,
+            #     "humidity":      humidity_f,
+            #     "soil_moisture": soil_f,
+            #     "ndvi":          ndvi_f,
+            #     "seismic_mag":   seismic_f,
+            #     "days_elevated": len(baseline_db.get(cell_id, [])) // 6
+            #     # approximation: 6 readings per day = days of data
+            # }
+
+            # Determine zone type from coordinates (simple rule)
+            zone_type = "urban"  # default
+            if (lng < 77.5 and lat < 15) or (lng > 80 and lat < 13):
+                zone_type = "coastal"
+            elif lat > 28 and lng > 77:
+                zone_type = "urban_floodplain"  # Delhi/Yamuna region
+            elif lat > 10 and lat < 12 and lng > 75 and lng < 77:
+                zone_type = "hillside_forest"   # Wayanad/Western Ghats
+
+            # Get affected assets from cell metadata if available
+            affected_assets = cell_metadata.get(cell_id, {}).get("assets", [])
+
+            agent_output = await run_agent_pipeline(
+                cell_id=cell_id,
+                telemetry=telemetry,
+                location=await get_location_name(lat, lng),
+                zone_type=zone_type,
+                affected_assets=affected_assets
+            )
+
+            # If agent pipeline returned a result, use its risk score
+            if agent_output and agent_output.get("risk"):
+                forecast_risk = agent_output["risk"]
+
+        except Exception as e:
+            import traceback
+            print(f"Agent pipeline error (non-fatal): {e}")
+            traceback.print_exc()   # ← ADD THIS LINE
+            agent_output = None
 
     # 3. LLM only explains the decision
     try:
@@ -227,14 +532,32 @@ async def run_cell_pipeline(lat: float, lng: float):
 
     # Generate alert if conditions met
     location_name = await get_location_name(lat, lng)
+
+    # Merge agent output into alert explanation if available
+    agent_explanation = explanation
+    if agent_output and agent_output.get("minister_brief"):
+        agent_explanation = agent_output["minister_brief"]
+
     alert = generate_alert(
-        cell_id, 
-        forecast_risk, 
-        status if alert_type != "NORMAL" else "STABLE", 
-        explanation, 
-        location=location_name, 
-        trigger=alert_type
+        cell_id,
+        forecast_risk,
+        status if alert_type != "NORMAL" else "STABLE",
+        agent_explanation,
+        location=location_name,
+        trigger=agent_output.get("disaster_type", alert_type) if agent_output else alert_type
     )
+
+    # Enrich alert with full agent pipeline data for MongoDB
+    if alert and agent_output:
+        alert["disaster_type"]          = agent_output.get("disaster_type")
+        alert["minister_brief"]         = agent_output.get("minister_brief")
+        alert["engineer_brief"]         = agent_output.get("engineer_brief")
+        alert["confidence"]             = agent_output.get("confidence")
+        alert["forecast_30d"]           = agent_output.get("forecast_30d")
+        alert["forecast_90d"]           = agent_output.get("forecast_90d")
+        alert["forecast_180d"]          = agent_output.get("forecast_180d")
+        alert["cost_crores"]            = agent_output.get("cost_crores")
+        alert["agent_pipeline_version"] = "2.0"
 
     result = {
         "node_id": cell_id,
@@ -248,10 +571,20 @@ async def run_cell_pipeline(lat: float, lng: float):
         "ai_report": explanation,
         "prediction": explanation,
         "history": [], # Baseline history refactoring in progress
-        "impacted_nodes": list(G.neighbors(cell_id)) if cell_id in G else [],
+        "impacted_nodes": get_impacted_nodes(cell_id, risk if 'risk' in dir() else 0),
         "nasa": nasa_data,
         "seismic": seismic,
-        "alert": alert
+        "alert": alert,
+        "agent_pipeline": {
+            "disaster_type": agent_output.get("disaster_type") if agent_output else None,
+            "confidence":    agent_output.get("confidence") if agent_output else None,
+            "minister_brief": agent_output.get("minister_brief") if agent_output else None,
+            "engineer_brief": agent_output.get("engineer_brief") if agent_output else None,
+            "forecast_30d":  agent_output.get("forecast_30d") if agent_output else None,
+            "forecast_90d":  agent_output.get("forecast_90d") if agent_output else None,
+            "forecast_180d": agent_output.get("forecast_180d") if agent_output else None,
+            "cost_crores":   agent_output.get("cost_crores") if agent_output else None,
+        } if agent_output else None,
     }
 
     # Persist to MongoDB (fire and forget — don't block response)
@@ -391,12 +724,163 @@ async def get_agents_global():
         "probes": "Causal logic active — Featherless Llama-3-70B"
     }
 
+async def run_agent_pipeline(cell_id: str, telemetry: dict,
+                              location: str, zone_type: str = "urban",
+                              affected_assets: list = None) -> dict:
+    """
+    Full 5-agent pipeline for one cell.
+    Returns enriched alert dict ready for save_alert().
+    """
+    if affected_assets is None:
+        affected_assets = []
+
+    # Stage 1: SENTINEL — detect anomaly
+    sentinel = get_sentinel(cell_id)
+    sentinel_result = await sentinel.process(telemetry)
+
+    if not sentinel_result.get("escalate", False):
+        return None  # No alert needed
+
+    # Stage 2: PROBE + VERITAS in parallel
+    probe_input = {
+        "sentinel_result": sentinel_result,
+        "zone_type":       zone_type,
+        "zone_name":       location,
+        "affected_assets": affected_assets
+    }
+    veritas_input = {
+        "sentinel_result": sentinel_result,
+        "probe_result":    {},  # will update after probe
+        "zone_type":       zone_type,
+        "days_elevated":   telemetry.get("days_elevated", 1)
+    }
+
+    probe_result, _ = await asyncio.gather(
+        _probe.process(probe_input),
+        asyncio.sleep(0)  # placeholder — veritas needs probe result
+    )
+
+    # VERITAS after PROBE (needs disaster type for plausibility check)
+    veritas_input["probe_result"] = probe_result
+    veritas_result = await _veritas.process(veritas_input)
+
+    # Stage 3: ORACLE — only if VERITAS confirms
+    oracle_input = {
+        "probe_result":   probe_result,
+        "veritas_result": veritas_result,
+        "sentinel_result": sentinel_result,
+        "affected_assets": affected_assets
+    }
+    oracle_result = await _oracle.process(oracle_input)
+    # Stage 4: SCRIBE — generate briefs
+    scribe_input = {
+        "zone_name":       location,
+        "disaster_type":   probe_result.get("disaster_type", "UNKNOWN"),
+        "severity":        probe_result.get("severity", "LOW"),
+        "mechanism":       probe_result.get("mechanism", ""),
+        "confidence":      veritas_result.get("ground_truth_score", 50),
+        "affected_assets": affected_assets,
+        "oracle":          oracle_result,
+        "sentinel_result": sentinel_result
+    }
+    scribe_result = await _scribe.generate_report(scribe_input)
+
+    # Stage 5: Compute final risk score (deterministic, no random)
+    severity      = probe_result.get("severity", "LOW")
+    veritas_score = veritas_result.get("ground_truth_score", 50)
+    max_z         = sentinel_result.get("max_z_score", 1.0)
+
+    weighted_score = (
+        {"LOW": 0.2, "MEDIUM": 0.4, "HIGH": 0.7, "CRITICAL": 0.9}[severity] * 0.40 +
+        (veritas_score / 100.0) * 0.35 +
+        min(max_z / 4.0, 1.0)  * 0.25
+    )
+    risk_score = round(weighted_score * 100, 1)
+
+    if weighted_score > 0.75:   risk_level = "CRITICAL"
+    elif weighted_score > 0.60: risk_level = "ALERT"
+    elif weighted_score > 0.45: risk_level = "WARNING"
+    elif weighted_score > 0.30: risk_level = "WATCH"
+    else:                       risk_level = "SAFE"
+
+    return {
+        "cell":                    cell_id,
+        "cell_id":                 cell_id,
+        "location":                location,
+        "risk":                    risk_score,
+        "status":                  risk_level,
+        "disaster_type":           probe_result.get("disaster_type"),
+        "trigger":                 probe_result.get("disaster_type", "ENVIRONMENTAL_ANOMALY"),
+        "message":                 scribe_result.get("citizen_alert", ""),
+        "minister_brief":          scribe_result.get("minister_brief", ""),
+        "engineer_brief":          scribe_result.get("engineer_brief", ""),
+        "confidence":              veritas_score,
+        "forecast_30d":            oracle_result.get("day30_mean"),
+        "forecast_90d":            oracle_result.get("day90_mean"),
+        "forecast_180d":           oracle_result.get("day180_mean"),
+        "cost_crores":             oracle_result.get("cost_of_inaction_crores"),
+        "agent_pipeline_version":  "2.0",
+        "time":                    datetime.utcnow().isoformat()
+    }
+
+
 @app.get("/api/alerts")
 async def get_alerts():
-    db_alerts = await get_all_alerts_from_db(limit=50)
-    if db_alerts:
-        return db_alerts
-    return alerts_db[:50]
+    """
+    Detects anomalies from baseline_db and:
+    1. Generates alert objects
+    2. Saves NEW alerts to MongoDB (skip if same cell already has recent alert)
+    3. Returns all alerts (new + existing from DB)
+    """
+    newly_detected = []
+
+    for cid, hist in baseline_db.items():
+        if len(hist) >= 2 and detect_anomaly(hist[-1], hist) == "ANOMALY":
+
+            # Check if alert for this cell already exists in last 6 hours
+            # to avoid duplicate alerts (cooldown period)
+            existing = await get_recent_alert_for_cell(cid, hours=6)
+            if existing:
+                continue  # skip duplicate
+
+            current_val = hist[-1]
+            avg_val = sum(hist) / len(hist)
+            deviation = abs(current_val - avg_val)
+
+            alert_doc = {
+                "cell_id": cid,
+                "location": cid,  # use cell_id as location fallback
+                "risk": round(min((deviation / max(avg_val, 0.01)) * 100, 99), 1),
+                "status": "ANOMALY",
+                "message": f"Signal deviation detected: {deviation:.3f} above baseline average",
+                "trigger": "SENTINEL_DETECTION",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            # Save to MongoDB using existing function
+            await save_alert(alert_doc)
+            newly_detected.append(alert_doc)
+
+    # Return ALL alerts from DB (persisted + new)
+    all_alerts = await get_all_alerts_from_db()
+    return {
+        "alerts": all_alerts,
+        "newly_detected": len(newly_detected),
+        "total": len(all_alerts)
+    }
+
+
+async def get_recent_alert_for_cell(cell_id: str, hours: int = 6):
+    """Check if an alert for this cell exists in the last N hours (cooldown guard)."""
+    from .services.database import get_db
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    db = await get_db()
+    result = await db.alerts.find_one({
+        "cell_id": cell_id,
+        "timestamp": {"$gte": cutoff}
+    })
+    return result
+
 
 @app.delete("/api/alerts/{alert_id}")
 async def delete_alert(alert_id: str):

@@ -152,7 +152,19 @@ async def save_alert(alert_data: dict):
             "status": alert_data.get("status"),
             "message": alert_data.get("message"),
             "trigger": alert_data.get("trigger", "Environmental Anomaly"),
-            "timestamp": datetime.fromisoformat(alert_data.get("time")) if isinstance(alert_data.get("time"), str) else datetime.utcnow()
+            "timestamp": datetime.fromisoformat(alert_data.get("time")) if isinstance(alert_data.get("time"), str) else datetime.utcnow(),
+            "disaster_type": alert_data.get("disaster_type"),
+            "minister_brief": alert_data.get("minister_brief"),
+            "engineer_brief": alert_data.get("engineer_brief"),
+            "confidence": alert_data.get("confidence"),
+            "forecast_30d": alert_data.get("forecast_30d"),
+            "forecast_90d": alert_data.get("forecast_90d"),
+            "forecast_180d": alert_data.get("forecast_180d"),
+            "cost_crores": alert_data.get("cost_crores"),
+            "agent_pipeline_version": alert_data.get("agent_pipeline_version", "1.0"),
+            "zone_name": alert_data.get("zone_name"),
+            "lat": alert_data.get("lat"),
+            "lon": alert_data.get("lon"),
         }
         await db.alerts.insert_one(doc)
     except Exception as e:
@@ -184,3 +196,11 @@ async def delete_alert_from_db(alert_id: str):
     except Exception as e:
         print(f"MongoDB delete_alert error: {e}")
         return False
+
+async def get_cell_by_id(node_id: str):
+    try:
+        db = await get_db()
+        doc = await db.cells.find_one({"node_id": node_id}, sort=[("_id", -1)])
+        return doc
+    except Exception:
+        return None

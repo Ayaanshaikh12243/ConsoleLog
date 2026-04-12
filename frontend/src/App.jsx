@@ -9,6 +9,7 @@ import SettingsPage from './pages/SettingsPage';
 import HistoryPage from './pages/HistoryPage';
 import UploadsPage from './pages/UploadsPage';
 import AlertsPage from './pages/AlertsPage';
+import AlertToast from './components/AlertToast';
 import SubmissionDashboard from './components/SubmissionDashboard';
 
 function App() {
@@ -42,6 +43,9 @@ function App() {
             <span className="text-stratum-accent uppercase">Fleet Status: Operational</span>
           </div>
         </footer>
+
+        {/* Alert Toast Notifications */}
+        <AlertToast />
       </div>
     </Router>
   );
