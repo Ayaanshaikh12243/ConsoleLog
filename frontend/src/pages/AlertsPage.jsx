@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import * as api from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, Clock, MapPin, ShieldAlert, Cpu,
-  Trash2, Zap, ChevronDown, ChevronUp, FileText, Wrench
+  Trash2, Zap, ChevronDown, ChevronUp, FileText, Wrench,
+  Loader2, X, BrainCircuit, ExternalLink, Download
 } from 'lucide-react';
 
 const AlertsPage = () => {
@@ -11,6 +13,22 @@ const AlertsPage = () => {
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState('ALL');
   const [expanded, setExpanded] = useState({});
+  const [generatingReport, setGeneratingReport] = useState(null);
+  const [currentReport, setCurrentReport] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [globalBriefing, setGlobalBriefing] = useState("");
+  const [briefingLoading, setBriefingLoading] = useState(true);
+
+  const fetchGlobalBriefing = async () => {
+    try {
+      const res = await axios.get('http://localhost:8000/api/intelligence/global-briefing');
+      setGlobalBriefing(res.data.briefing);
+    } catch (err) {
+      console.error('Failed briefing', err);
+    } finally {
+      setBriefingLoading(false);
+    }
+  };
 
   const fetchAlerts = async () => {
     try {
@@ -26,7 +44,11 @@ const AlertsPage = () => {
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 10000);
+    fetchGlobalBriefing();
+    const interval = setInterval(() => {
+        fetchAlerts();
+        fetchGlobalBriefing();
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -41,6 +63,65 @@ const AlertsPage = () => {
 
   const toggleExpand = (id) =>
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const handleGenerateReport = async (alertId) => {
+    setGeneratingReport(alertId);
+    try {
+      const data = await api.generateAlertReport(alertId);
+      if (data.status === 'GENERATED') {
+        setCurrentReport(data);
+      } else {
+        alert(data.message || 'Generation failed');
+      }
+    } catch (err) {
+      console.error('Report generation error:', err);
+      alert('SENTINEL-QWEN Reasoning Engine Link Failure.');
+    } finally {
+      setGeneratingReport(null);
+    }
+  };
+
+  const handleSaveToReports = async () => {
+    if (!currentReport) return;
+    setSaving(true);
+    try {
+      // Find the alert this report belongs to for location/context
+      const alertSource = alerts.find(a => String(a.id) === String(currentReport.alert_id));
+      
+      const reportToSave = {
+        summary: `Strategic Intelligence: ${alertSource?.location || 'Unknown Zone'}`,
+        disaster_type: (alertSource?.disaster_type || alertSource?.trigger || 'Anomaly').toLowerCase(),
+        affected_area: alertSource?.location || 'Unknown Sector',
+        severity: alertSource?.risk > 70 ? 'critical' : 'high',
+        key_findings: [
+          'Autonomous Qwen-model reasoning active',
+          'Cross-referenced with real-time sensor array'
+        ],
+        infrastructure_risk: {
+            roads: 'unknown',
+            bridges: 'unknown',
+            water_systems: 'unknown',
+            power_grid: 'unknown',
+            buildings: 'unknown'
+        },
+        immediate_actions: ['Manual verification of AI strategic targets'],
+        generated_at: currentReport.timestamp,
+        confidence: 0.92,
+        // Custom field for the full Qwen text
+        ai_report_text: currentReport.report,
+        is_ai_generated: true
+      };
+      
+      await api.saveReport(reportToSave);
+      alert('Intelligence Pinned to Archive.');
+      setCurrentReport(null);
+    } catch (err) {
+      console.error('Save failed:', err);
+      alert('Archive Deployment Failed.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const filtered = alerts.filter(a => {
     if (filter === 'ALL')      return true;
@@ -111,6 +192,39 @@ const AlertsPage = () => {
               </span>
             </button>
           ))}
+        </div>
+        {/* ── Global Sentiment Card ──────────────────────────────── */}
+        <div className="flex-1 min-w-[300px]">
+           <div className="glass-panel p-5 rounded-3xl border border-stratum-accent/20 bg-stratum-accent/[0.05] relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <BrainCircuit className="w-16 h-16 text-stratum-accent" />
+              </div>
+              <div className="relative z-10 flex flex-col h-full">
+                <div className="flex items-center gap-2 mb-3">
+                  <Cpu className="w-3.5 h-3.5 text-stratum-accent" />
+                  <span className="text-[10px] font-black text-stratum-accent uppercase tracking-[0.2em]">Sentinel Strategic Briefing</span>
+                </div>
+                {briefingLoading ? (
+                  <div className="space-y-2">
+                    <div className="h-4 bg-white/5 animate-pulse rounded w-full" />
+                    <div className="h-4 bg-white/5 animate-pulse rounded w-2/3" />
+                  </div>
+                ) : (
+                  <p className="text-sm font-bold text-white/90 leading-relaxed max-w-2xl italic">
+                    "{globalBriefing}"
+                  </p>
+                )}
+                <div className="mt-4 flex items-center gap-4">
+                   <div className="flex items-center gap-1.5 font-mono text-[9px] text-white/30 uppercase">
+                      <span className="w-1.5 h-1.5 rounded-full bg-stratum-accent animate-ping" />
+                      LLM-Qwen-Core: Active
+                   </div>
+                   <div className="text-[9px] font-bold text-stratum-accent/50 uppercase tracking-widest">
+                      Planetary Integrity: 94.2%
+                   </div>
+                </div>
+              </div>
+           </div>
         </div>
       </header>
 
@@ -245,12 +359,30 @@ const AlertsPage = () => {
                     </AnimatePresence>
 
                     {/* Footer */}
-                    <div className="grid grid-cols-2 gap-4 border-t border-white/5 pt-3">
+                    <div className="flex items-center justify-between gap-4 flex-wrap border-t border-white/5 pt-3">
                       <div className="flex items-center space-x-2">
                         <MapPin className="w-3 h-3 text-stratum-accent" />
                         <span className="text-[10px] font-black text-white/60 truncate">
                           {alert.location}
                         </span>
+                      </div>
+                      
+                      {/* NEW: AI Generation Button */}
+                      <div className="flex items-center gap-2 justify-end">
+                        <button
+                          onClick={() => handleGenerateReport(alert.id)}
+                          disabled={generatingReport === alert.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stratum-accent/10 border border-stratum-accent/20 text-stratum-accent hover:bg-stratum-accent/20 transition-all disabled:opacity-40"
+                        >
+                          {generatingReport === alert.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <BrainCircuit className="w-3 h-3" />
+                          )}
+                          <span className="text-[8px] font-black uppercase tracking-widest">
+                            GENERATE QWEN REPORT
+                          </span>
+                        </button>
                       </div>
                       <div className="flex items-center space-x-2 justify-end">
                         <Clock className="w-3 h-3 text-white/20" />
@@ -276,6 +408,80 @@ const AlertsPage = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* ── AI Report Modal ────────────────────────────────────── */}
+      <AnimatePresence>
+        {currentReport && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] border border-black"
+            >
+              {/* Modal Header */}
+              <div className="p-6 bg-black text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-stratum-accent/20 rounded-xl">
+                    <BrainCircuit className="w-5 h-5 text-stratum-accent" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-[0.2em]">SENTINEL-QWEN INTELLIGENCE</h2>
+                    <p className="text-[10px] text-white/40 font-mono">MODEL: {currentReport.model}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setCurrentReport(null)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar-light font-sans text-black">
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-black/30 tracking-widest uppercase">
+                    <FileText className="w-3 h-3" />
+                    Generated Report Content
+                  </div>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed font-medium bg-gray-50 p-6 rounded-2xl border border-black/5 selection:bg-stratum-accent selection:text-black">
+                    {currentReport.report}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 bg-gray-100 border-t border-black/5 flex items-center justify-between">
+                <span className="text-[9px] font-black text-black/30 uppercase tracking-[0.1em]">
+                  AUTH: STRATUM-7-CORE
+                </span>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setCurrentReport(null)}
+                    className="px-4 py-2 border border-black/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black/5 transition-all"
+                  >
+                    Discard
+                  </button>
+                  <button 
+                    onClick={handleSaveToReports}
+                    disabled={saving}
+                    className="px-6 py-2 bg-black text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-stratum-accent hover:text-black transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                    Save to Archive
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

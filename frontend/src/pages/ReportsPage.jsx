@@ -7,87 +7,16 @@ import {
   Shield, Loader2, FileBadge
 } from 'lucide-react';
 
-const QuickReportDownload = () => {
-  const [alerts, setAlerts] = useState([]);
-  const [downloading, setDownloading] = useState(null);
 
-  useEffect(() => {
-    fetch('http://localhost:8000/api/alerts')
-      .then(r => r.json())
-      .then(data => setAlerts(Array.isArray(data) ? data : data.alerts || []))
-      .catch(() => {});
-  }, []);
-
-  const downloadPDF = async (cellId, location) => {
-    setDownloading(cellId);
-    try {
-      const res = await fetch(`http://localhost:8000/api/report/${cellId}/pdf`);
-      if (!res.ok) throw new Error('Failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `STRATUM-${(location || cellId).replace(/,/g,'').replace(/ /g,'-')}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert('PDF failed — run: pip install fpdf2');
-    } finally {
-      setDownloading(null);
-    }
-  };
-
-  if (alerts.length === 0) return null;
-
-  return (
-    <div className="glass-panel p-6 rounded-3xl border border-stratum-accent/20 bg-stratum-accent/[0.02] space-y-4">
-      <div className="flex items-center gap-2">
-        <FileBadge className="w-4 h-4 text-stratum-accent" />
-        <span className="text-[10px] font-black text-stratum-accent uppercase tracking-[0.2em]">
-          Quick PDF Download — Active Alerts
-        </span>
-      </div>
-      <div className="space-y-2">
-        {alerts.slice(0, 5).map(alert => (
-          <div key={alert.id} className="flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/5">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className={`w-2 h-2 rounded-full shrink-0 ${
-                alert.risk > 70 ? 'bg-red-400 animate-pulse' :
-                alert.risk > 35 ? 'bg-yellow-400' : 'bg-cyan-400'
-              }`} />
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold text-white truncate">{alert.location}</p>
-                <p className="text-[8px] text-white/30 uppercase">
-                  {alert.disaster_type} · {alert.risk}% risk · {new Date(alert.time).toLocaleTimeString()}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => downloadPDF(alert.cell, alert.location)}
-              disabled={downloading === alert.cell}
-              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stratum-accent/10 border border-stratum-accent/20 text-stratum-accent hover:bg-stratum-accent/20 transition-all text-[9px] font-black uppercase tracking-widest disabled:opacity-40"
-            >
-              {downloading === alert.cell
-                ? <Loader2 className="w-3 h-3 animate-spin" />
-                : <Download className="w-3 h-3" />
-              }
-              PDF
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const ReportsPage = () => {
-  const [reports, setReports]           = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [analyzing, setAnalyzing]       = useState(false);
-  const [reportText, setReportText]     = useState('');
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [reportText, setReportText] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
-  const [downloading, setDownloading]   = useState(null); // node_id being downloaded
+  const [downloading, setDownloading] = useState(null); // node_id being downloaded
 
   useEffect(() => { fetchReports(); }, []);
 
@@ -149,20 +78,21 @@ const ReportsPage = () => {
   const handleDownloadPDF = async (nodeId, reportName) => {
     setDownloading(nodeId);
     try {
+      const host = window.location.hostname;
       const res = await fetch(
-        `http://localhost:8000/api/report/${nodeId}/pdf`
+        `http://${host}:8000/api/archive/report/${nodeId}/pdf`
       );
-      if (!res.ok) throw new Error('PDF generation failed');
+      if (!res.ok) throw new Error('Archive File Desync');
       const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `STRATUM-${reportName || nodeId.substring(0,8)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `STRATUM-${reportName || nodeId.substring(0, 8)}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error('Download error:', e);
-      alert('PDF generation failed. Make sure fpdf2 is installed.');
+      alert(`PDF Export Error: ${e.message}`);
     } finally {
       setDownloading(null);
     }
@@ -170,7 +100,7 @@ const ReportsPage = () => {
 
   const severityColors = {
     low: 'text-green-400', medium: 'text-yellow-400',
-    high: 'text-red-400',  critical: 'text-purple-400'
+    high: 'text-red-400', critical: 'text-purple-400'
   };
   const bgSeverity = {
     low: 'bg-green-400/10 border-green-400/20',
@@ -192,7 +122,7 @@ const ReportsPage = () => {
                 Autonomous Intelligence
               </span>
             </div>
-            <h1 className="text-4xl font-black text-white tracking-tight">AIR ANALYZER</h1>
+            <h1 className="text-4xl font-black text-white tracking-tight">AI ANALYZER</h1>
             <p className="text-white/40 text-sm mt-1">
               Autonomous Incident Report analysis — SENTINEL pipeline.
             </p>
@@ -250,11 +180,10 @@ const ReportsPage = () => {
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing || (!reportText && !selectedFile)}
-                  className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 ${
-                    analyzing
+                  className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 ${analyzing
                       ? 'bg-white/5 text-white/20'
                       : 'bg-stratum-accent text-black hover:scale-[1.02] active:scale-95'
-                  }`}
+                    }`}
                 >
                   {analyzing
                     ? <><Loader2 className="w-4 h-4 animate-spin" /> Engaging Reasoning Engine...</>
@@ -264,7 +193,7 @@ const ReportsPage = () => {
               </div>
             </div>
 
-            <QuickReportDownload />
+
 
             {/* ── Archive List with PDF Download ────────────── */}
             <div className="space-y-4 pt-4 border-t border-white/5">
@@ -301,12 +230,11 @@ const ReportsPage = () => {
                         onClick={() => handleViewReport(report.id)}
                         className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
                       >
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${
-                          report.severity === 'critical' ? 'bg-purple-400' :
-                          report.severity === 'high'     ? 'bg-red-400' :
-                          report.severity === 'medium'   ? 'bg-yellow-400' :
-                          'bg-green-400'
-                        }`} />
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${report.severity === 'critical' ? 'bg-purple-400' :
+                            report.severity === 'high' ? 'bg-red-400' :
+                              report.severity === 'medium' ? 'bg-yellow-400' :
+                                'bg-green-400'
+                          }`} />
                         <div className="min-w-0">
                           <p className="text-[10px] font-bold text-white truncate group-hover:text-stratum-accent transition-colors">
                             {report.name}
@@ -368,57 +296,86 @@ const ReportsPage = () => {
                       <div className={`px-4 py-1 border-2 border-black font-black text-sm uppercase ${severityColors[analysisResult.severity]}`}>
                         {analysisResult.severity}
                       </div>
+                      <button
+                        onClick={() => handleDownloadPDF(analysisResult.id, analysisResult.affected_area || analysisResult.location)}
+                        disabled={downloading === analysisResult.id}
+                        className="p-1.5 border-2 border-black text-black hover:bg-black hover:text-white transition-all"
+                        title="Download as PDF"
+                      >
+                        {downloading === analysisResult.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
 
                   <div className="space-y-8 flex-1">
-                    <div className="space-y-2">
-                      <p className="text-[10px] font-bold uppercase underline">01. Incident Summary</p>
-                      <p className="text-sm leading-relaxed font-bold italic">"{analysisResult.summary}"</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-10">
+                    {analysisResult.is_ai_generated && analysisResult.ai_report_text ? (
                       <div className="space-y-4">
-                        <p className="text-[10px] font-bold uppercase underline">02. Incident Geometry</p>
-                        <table className="w-full text-[11px] font-bold">
-                          <tbody>
-                            <tr className="border-b border-black/10"><td className="py-1">TYPE:</td><td className="py-1 text-right">{analysisResult.disaster_type}</td></tr>
-                            <tr className="border-b border-black/10"><td className="py-1">AREA:</td><td className="py-1 text-right">{analysisResult.affected_area}</td></tr>
-                            <tr className="border-b border-black/10"><td className="py-1">SCORE:</td><td className="py-1 text-right">{analysisResult.severity_score}/10</td></tr>
-                            <tr><td className="py-1">ACTION:</td><td className="py-1 text-right uppercase underline">{analysisResult.sentinel_signal}</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="space-y-3">
-                        <p className="text-[10px] font-bold uppercase underline">03. Key Findings</p>
-                        <ul className="text-[10px] font-bold space-y-2">
-                          {analysisResult.key_findings?.map((f, i) => (
-                            <li key={i} className="flex gap-2"><span>•</span><span>{f}</span></li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <p className="text-[10px] font-bold uppercase underline">04. Infrastructure Risk Matrix</p>
-                      <div className="grid grid-cols-5 gap-2">
-                        {Object.entries(analysisResult.infrastructure_risk || {}).map(([key, value]) => (
-                          <div key={key} className={`border border-black/20 p-2 text-center ${bgSeverity[value]}`}>
-                            <p className="text-[8px] uppercase font-black mb-1">{key}</p>
-                            <p className="text-[9px] font-black uppercase underline">{value}</p>
+                        <p className="text-[10px] font-bold uppercase underline tracking-widest">QWEN STRATEGIC REASONING OUTPUT</p>
+                        <div className="whitespace-pre-wrap text-[13px] leading-relaxed font-medium bg-gray-50 p-8 rounded-2xl border border-black/5 italic">
+                          {analysisResult.ai_report_text}
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mt-6">
+                          <div className="p-4 bg-black text-white rounded-xl">
+                            <p className="text-[9px] uppercase font-black text-stratum-accent mb-1">Alert Context</p>
+                            <p className="text-[11px] font-bold uppercase">{analysisResult.disaster_type} @ {analysisResult.affected_area}</p>
                           </div>
-                        ))}
+                          <div className="p-4 border border-black rounded-xl">
+                            <p className="text-[9px] uppercase font-black text-black/40 mb-1">Confidence Score</p>
+                            <p className="text-[11px] font-bold">{(analysisResult.confidence * 100).toFixed(1)}% GROUND TRUTH</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="space-y-3 bg-black text-white p-6">
-                      <p className="text-[10px] font-bold uppercase text-stratum-accent">--- Immediate Response Measures ---</p>
-                      <ul className="text-xs space-y-2">
-                        {analysisResult.immediate_actions?.map((action, i) => (
-                          <li key={i} className="flex gap-3 items-center">
-                            <div className="w-4 h-4 border border-white/30 flex items-center justify-center text-[10px] font-bold">{i + 1}</div>
-                            {action}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-bold uppercase underline">01. Incident Summary</p>
+                          <p className="text-sm leading-relaxed font-bold italic">"{analysisResult.summary}"</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-10">
+                          <div className="space-y-4">
+                            <p className="text-[10px] font-bold uppercase underline">02. Incident Geometry</p>
+                            <table className="w-full text-[11px] font-bold">
+                              <tbody>
+                                <tr className="border-b border-black/10"><td className="py-1">TYPE:</td><td className="py-1 text-right">{analysisResult.disaster_type}</td></tr>
+                                <tr className="border-b border-black/10"><td className="py-1">AREA:</td><td className="py-1 text-right">{analysisResult.affected_area}</td></tr>
+                                <tr className="border-b border-black/10"><td className="py-1">SCORE:</td><td className="py-1 text-right">{analysisResult.severity_score}/10</td></tr>
+                                <tr><td className="py-1">ACTION:</td><td className="py-1 text-right uppercase underline">{analysisResult.sentinel_signal}</td></tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="space-y-3">
+                            <p className="text-[10px] font-bold uppercase underline">03. Key Findings</p>
+                            <ul className="text-[10px] font-bold space-y-2">
+                              {analysisResult.key_findings?.map((f, i) => (
+                                <li key={i} className="flex gap-2"><span>•</span><span>{f}</span></li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <p className="text-[10px] font-bold uppercase underline">04. Infrastructure Risk Matrix</p>
+                          <div className="grid grid-cols-5 gap-2">
+                            {Object.entries(analysisResult.infrastructure_risk || {}).map(([key, value]) => (
+                              <div key={key} className={`border border-black/20 p-2 text-center ${bgSeverity[value]}`}>
+                                <p className="text-[8px] uppercase font-black mb-1">{key}</p>
+                                <p className="text-[9px] font-black uppercase underline">{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-3 bg-black text-white p-6">
+                          <p className="text-[10px] font-bold uppercase text-stratum-accent">--- Immediate Response Measures ---</p>
+                          <ul className="text-xs space-y-2">
+                            {analysisResult.immediate_actions?.map((action, i) => (
+                              <li key={i} className="flex gap-3 items-center">
+                                <div className="w-4 h-4 border border-white/30 flex items-center justify-center text-[10px] font-bold">{i + 1}</div>
+                                {action}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="mt-8 pt-6 border-t border-black flex justify-between items-center text-[9px] font-bold opacity-50">
@@ -431,7 +388,7 @@ const ReportsPage = () => {
                   <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
                     <Shield className="w-8 h-8 text-white/10" />
                   </div>
-                  <h3 className="text-xl font-bold text-white/20 mb-2">AIR INTELLIGENCE STANDBY</h3>
+                  <h3 className="text-xl font-bold text-white/20 mb-2">AI INTELLIGENCE STANDBY</h3>
                   <p className="text-sm text-white/10 max-w-xs leading-relaxed">
                     Upload a report or paste incident text to engage SENTINEL reasoning and generate analysis.
                   </p>

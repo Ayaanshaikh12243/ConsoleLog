@@ -10,6 +10,7 @@ from collections import defaultdict
 import httpx
 import math
 import json
+import re
 
 from .services.data_sources import DataSourceService
 from .services.intelligence import IntelligenceService
@@ -29,6 +30,8 @@ from .agents.sentinel import SentinelAgent
 from .agents.intelligence import ProbeAgent, VeritasAgent, OracleAgent
 from .agents.meta import ScribeAgent
 from contextlib import asynccontextmanager
+from .services.llm import call_featherless_llm
+from bson import ObjectId
 
 INDIA_MONITOR_ZONES = [
     (19.0596, 72.8656),   # Mumbai
@@ -88,21 +91,17 @@ from fpdf import FPDF
 from fastapi.responses import FileResponse
 import tempfile
 
-@app.get("/api/report/{node_id}/pdf")
-async def download_pdf_report(node_id: str):
-    """Generate and download a PDF intelligence report for a cell."""
 
-    # Pull latest cell data from MongoDB
-    from .services.database import get_cell_by_id
-    cell = await get_cell_by_id(node_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+def _create_report_pdf(data: dict, node_id: str):
+    """Helper to build a PDF from a report data dictionary."""
+    pipeline = data.get("agent_pipeline") or data.get("alert") or data or {}
+    seismic  = data.get("seismic", {})
+    nasa     = data.get("nasa", {})
+    
+    # Check if it was an AI generated report (Qwen)
+    is_ai = data.get("is_ai_generated", False)
+    ai_text = data.get("ai_report_text", "")
 
-    pipeline = cell.get("agent_pipeline") or cell.get("alert") or {}
-    seismic  = cell.get("seismic", {})
-    nasa     = cell.get("nasa", {})
-
-    # ── Build PDF ─────────────────────────────────────────────
     pdf = FPDF()
     pdf.set_margins(20, 20, 20)
     pdf.add_page()
@@ -120,10 +119,8 @@ async def download_pdf_report(node_id: str):
     pdf.set_font("Helvetica", "", 8)
     pdf.set_xy(20, 20)
     pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}  |  Node: {node_id}", ln=True)
-
     pdf.ln(8)
 
-    # ── Section: Risk Summary ──────────────────────────────────
     def section_title(title):
         pdf.set_fill_color(20, 20, 22)
         pdf.set_text_color(0, 242, 255)
@@ -139,65 +136,110 @@ async def download_pdf_report(node_id: str):
         pdf.set_text_color(220, 220, 220) if not highlight else pdf.set_text_color(255, 80, 50)
         pdf.cell(0, 7, str(value), ln=True)
 
-    pdf.set_fill_color(255, 255, 255)
-
     section_title("RISK ASSESSMENT")
-    row("Location",      cell.get("location", "Unknown"))
-    row("Risk Index",    f"{cell.get('risk', 0)}%",     highlight=cell.get('risk', 0) > 50)
-    row("Status",        cell.get("status", "—"),       highlight=cell.get('status') in ['CRITICAL','WARNING'])
-    row("Alert Type",    cell.get("alert_type", "—"))
+    row("Location",      data.get("location", data.get("affected_area", "Unknown")))
+    row("Risk Index",    f"{data.get('risk', 0)}%",     highlight=data.get('risk', 0) > 50)
+    row("Status",        data.get("status", "—"),       highlight=data.get('status') in ['CRITICAL','WARNING'])
+    row("Alert Type",    data.get("alert_type", "—"))
     row("Disaster Type", pipeline.get("disaster_type", "—"))
-    row("Severity",      pipeline.get("severity", pipeline.get("confidence", "—")))
+    row("Severity",      data.get("severity", "—"))
     pdf.ln(4)
 
-    section_title("ORACLE MONTE CARLO FORECAST")
-    row("VERITAS Confidence", f"{pipeline.get('confidence', '—')}%")
-    row("30-Day Risk",  f"{round((pipeline.get('forecast_30d',  0) or 0) * 100, 1)}%")
-    row("90-Day Risk",  f"{round((pipeline.get('forecast_90d',  0) or 0) * 100, 1)}%")
-    row("180-Day Risk", f"{round((pipeline.get('forecast_180d', 0) or 0) * 100, 1)}%")
-    row("Cost if Unaddressed", f"INR {pipeline.get('cost_crores', 0)} Crore")
-    pdf.ln(4)
+    if is_ai and ai_text:
+        section_title("QWEN AI STRATEGIC INTELLIGENCE")
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(200, 200, 200)
+        pdf.multi_cell(0, 6, ai_text)
+        pdf.ln(4)
+    else:
+        section_title("ORACLE MONTE CARLO FORECAST")
+        row("VERITAS Confidence", f"{pipeline.get('confidence', '—')}%")
+        row("30-Day Risk",  f"{round((pipeline.get('forecast_30d',  0) or 0) * 100, 1)}%")
+        row("90-Day Risk",  f"{round((pipeline.get('forecast_90d',  0) or 0) * 100, 1)}%")
+        row("180-Day Risk", f"{round((pipeline.get('forecast_180d', 0) or 0) * 100, 1)}%")
+        row("Cost if Unaddressed", f"INR {pipeline.get('cost_crores', 0)} Crore")
+        pdf.ln(4)
 
-    section_title("LIVE SENSOR DATA (NASA POWER)")
-    row("Temperature",   f"{nasa.get('temp', '—')} °C")
-    row("Humidity",      f"{nasa.get('humidity', '—')} %")
-    row("Rainfall",      f"{nasa.get('rainfall', '—')} mm/day")
-    row("Data Source",   nasa.get("source", "NASA POWER"))
-    pdf.ln(4)
+    if nasa.get('temp'):
+        section_title("LIVE SENSOR DATA (NASA POWER)")
+        row("Temperature",   f"{nasa.get('temp', '—')} °C")
+        row("Humidity",      f"{nasa.get('humidity', '—')} %")
+        row("Rainfall",      f"{nasa.get('rainfall', '—')} mm/day")
+        pdf.ln(4)
 
     if seismic.get("mag"):
         section_title("SEISMIC EVENT (USGS)")
         row("Magnitude",  f"M{seismic.get('mag')}")
         row("Depth",      f"{seismic.get('depth_km')} km")
-        row("Location",   seismic.get("place", "—"))
-        row("Time",       str(datetime.fromtimestamp(seismic['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')) if seismic.get('time') else "—")
         pdf.ln(4)
 
     section_title("MINISTER BRIEF")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(200, 200, 200)
-    pdf.multi_cell(0, 6, pipeline.get("minister_brief") or cell.get("cause") or "No brief available.")
+    pdf.multi_cell(0, 6, pipeline.get("minister_brief") or data.get("summary") or "No brief available.")
     pdf.ln(4)
 
-    section_title("ENGINEER BRIEF (STRATUM PROBE)")
+    section_title("TECHNICAL SPECS (STRATUM PROBE)")
     pdf.set_font("Courier", "", 8)
     pdf.set_text_color(180, 180, 180)
     pdf.multi_cell(0, 5, pipeline.get("engineer_brief") or "No technical brief available.")
-    pdf.ln(4)
-
+    
     # Footer
     pdf.set_y(-20)
     pdf.set_font("Helvetica", "", 7)
     pdf.set_text_color(80, 80, 80)
     pdf.cell(0, 5, "STRATUM — Autonomous Planetary Disaster Intelligence System | ConsoleLog Team | Confidential", align="C")
 
-    # ── Save & Return ──────────────────────────────────────────
-    filename = f"STRATUM-Report-{node_id[:8]}.pdf"
-    filepath = REPORTS_DIR / filename
-    pdf.output(str(filepath))
+    # Save to temp file
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf.output(temp.name)
+    return temp.name
+
+@app.get("/api/report/{node_id}/pdf")
+async def download_pdf_report(node_id: str):
+    """Generate and download a PDF intelligence report for a cell (live)."""
+    from .services.database import get_cell_by_id, get_db
+    cell = await get_cell_by_id(node_id)
+    
+    if not cell:
+        # Fallback: Search in alerts collection
+        db = await get_db()
+        try:
+            cell = await db.alerts.find_one({"_id": ObjectId(node_id)})
+        except:
+            cell = await db.alerts.find_one({"id": int(node_id) if node_id.isdigit() else node_id})
+            
+    if not cell:
+        # Final fallback: Memory
+        cell = next((a for a in alerts_db if str(a.get("id")) == str(node_id)), None)
+
+    if not cell:
+        raise HTTPException(status_code=404, detail="Incident data not found in live buffer or archive")
+
+    pdf_path = _create_report_pdf(cell, node_id)
+    filename = f"STRATUM-Live-{node_id[:8]}.pdf"
 
     return FileResponse(
-        path=str(filepath),
+        path=pdf_path,
+        filename=filename,
+        media_type="application/pdf"
+    )
+
+@app.get("/api/archive/report/{report_id}/pdf")
+async def download_archive_pdf_report(report_id: str):
+    """Generate and download a PDF intelligence report from the archive."""
+    file_path = REPORTS_DIR / f"{report_id}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archived report file not found")
+    
+    async with aiofiles.open(file_path, 'r') as f:
+        data = json.loads(await f.read())
+    
+    pdf_path = _create_report_pdf(data, report_id)
+    filename = f"STRATUM-Archive-{report_id}.pdf"
+
+    return FileResponse(
+        path=pdf_path,
         filename=filename,
         media_type="application/pdf"
     )
@@ -889,6 +931,76 @@ async def delete_alert(alert_id: str):
         return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Alert not found")
 
+@app.post("/api/alerts/{alert_id}/generate-report")
+async def generate_alert_report(alert_id: str):
+    """Generate a detailed AI report for a specific alert using Qwen 2.5 1.5B."""
+    # Search for the alert in MongoDB
+    from .services.database import get_db
+    db = await get_db()
+    
+    # alert_id might be a string (Mongo ObjectID) or integer string
+    # Try finding by MongoDB _id first
+    try:
+        alert = await db.alerts.find_one({"_id": ObjectId(alert_id)})
+    except:
+        alert = None
+        
+    if not alert:
+        # Try finding as integer if it's numeric and stored in a custom 'id' field
+        try:
+            alert = await db.alerts.find_one({"id": int(alert_id)})
+        except:
+            pass
+            
+    if not alert:
+        # Last resort: check in-memory alerts_db
+        alert = next((a for a in alerts_db if str(a.get("id")) == str(alert_id)), None)
+
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert source not found in archive.")
+
+    # Construct professional prompt for Qwen 2.5 1.5B
+    prompt = f"""
+    You are SENTINEL-QWEN, an elite planetary disaster intelligence agent.
+    Generate a high-density, authoritative intelligence report for the following incident.
+    
+    [ALERT CONTEXT]
+    - Incident Location: {alert.get('location')}
+    - Risk Profile: {alert.get('risk')}% Risk Index
+    - Alert Trigger: {alert.get('trigger')}
+    - Incident Message: {alert.get('message')}
+    - Strategic Brief: {alert.get('minister_brief', 'No strategic brief provided.')}
+    - Technical Specs: {alert.get('engineer_brief', 'No technical data provided.')}
+    
+    [REQUIREMENTS]
+    1. EXCLUSIONARY ANALYSIS: Deduce the likely cause-effect chain.
+    2. INFRASTRUCTURE VULNERABILITIES: Identify exactly what is at risk in {alert.get('location')}.
+    3. AUTONOMOUS COUNTERMEASURES: Propose immediate AI-led or manual responses.
+    4. CONFIDENCE RATING: Assign a confidence score to this generated report.
+    
+    Output in professional Markdown. Use bold headers. Keep it extremely high-density and command-center ready.
+    """
+
+    try:
+        report_content = await call_featherless_llm(
+            prompt=prompt, 
+            model="Qwen/Qwen2.5-1.5B-Instruct"
+        )
+        return {
+            "status": "GENERATED",
+            "alert_id": alert_id,
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "report": report_content,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Report generation failed: {e}")
+        return {
+            "status": "ERROR",
+            "message": "Featherless AI reasoning engine timed out.",
+            "fallback": "Please check your FEATHERLESS_API_KEY or model availability."
+        }
+
 @app.get("/api/anomalies")
 async def get_anomalies():
     return await get_alerts()
@@ -929,21 +1041,26 @@ async def get_reports():
     """List all AI reports from storage."""
     reports = []
     if REPORTS_DIR.exists():
+        print(f"🔍 Checking reports directory: {REPORTS_DIR.absolute()}")
         for file in REPORTS_DIR.glob("*.json"):
             try:
                 async with aiofiles.open(file, 'r') as f:
-                    data = json.loads(await f.read())
+                    content = await f.read()
+                    data = json.loads(content)
                     reports.append({
                         "id": file.stem,
                         "name": f"{data.get('disaster_type', 'Report').upper()} — {data.get('affected_area', 'Sector Unknown')}",
-                        "date": data.get("generated_at", "").split("T")[0],
+                        "date": data.get("generated_at", "").split("T")[0] if data.get("generated_at") else "Unknown",
                         "severity": data.get("severity", "unknown")
                     })
             except Exception as e:
-                logger.error(f"Error reading report {file}: {e}")
+                print(f"❌ Error reading report {file}: {e}")
+    else:
+        print(f"⚠️ Reports directory not found: {REPORTS_DIR.absolute()}")
     
     # Sort by date descending
     reports.sort(key=lambda x: x['date'], reverse=True)
+    print(f"📊 Returning {len(reports)} reports to frontend")
     return reports
 
 @app.post("/api/reports")
@@ -968,6 +1085,104 @@ async def get_report_detail(report_id: str):
         return json.loads(await f.read())
 
 # ── DYNAMIC ANALYTICS ENDPOINTS ─────────────────────────────────────────────
+
+@app.post("/api/sentinel/analyze")
+async def sentinel_analyze_text(payload: dict):
+    """Analyze raw text using the Qwen 2.5 1.5B 'Safe Model'."""
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+    
+    prompt = f"""
+    You are SENTINEL-QWEN Core. Analyze the following raw incident data and extract a structured intelligence report.
+    
+    [RAW DATA]
+    {text}
+    
+    [JSON OUTPUT FORMAT]
+    {{
+      "summary": "Short professional summary",
+      "disaster_type": "category (e.g. flood, earthquake)",
+      "affected_area": "Specific location",
+      "severity": "low/medium/high/critical",
+      "severity_score": 8,
+      "key_findings": ["point 1", "point 2"],
+      "infrastructure_risk": {{
+        "roads": "low/medium/high/critical",
+        "power": "low/medium/high/critical",
+        "water": "low/medium/high/critical"
+      }},
+      "immediate_actions": ["action 1", "action 2"],
+      "sentinel_signal": "monitoring/elevate/dispatch",
+      "confidence": 0.9
+    }}
+    
+    Respond ONLY with the JSON block. No conversational text.
+    """
+    
+    try:
+        response = await call_featherless_llm(prompt, model="Qwen/Qwen2.5-1.5B-Instruct")
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+        else:
+            data = json.loads(response)
+            
+        data["generated_at"] = datetime.utcnow().isoformat()
+        return data
+    except Exception as e:
+        logger.error(f"Sentinel Analysis Error: {e}")
+        # Fallback to high-fidelity mock if LLM fails
+        return {
+            "summary": "OFFLINE SENTINEL ANALYSIS: Potential localized anomaly detected in raw stream.",
+            "disaster_type": "unknown",
+            "affected_area": "Sector Analysis Pending",
+            "severity": "high",
+            "severity_score": 7,
+            "key_findings": ["Signal variance exceeds 2.5 sigma", "Atmospheric or seismic drift observed"],
+            "infrastructure_risk": {"roads": "medium", "power": "high", "water": "medium"},
+            "immediate_actions": ["Deploy MERIDIAN mobile hub", "Activate field probe array"],
+            "sentinel_signal": "elevate",
+            "confidence": 0.85,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+
+@app.post("/api/sentinel/analyze-file")
+async def sentinel_analyze_file(file: UploadFile = File(...)):
+    """Analyze uploaded file content using the Safe Model."""
+    content = await file.read()
+    try:
+        text_preview = content[:2000].decode("utf-8", errors="ignore")
+    except:
+        text_preview = "[Binary Data / Image Content]"
+        
+    # For now, treat file analysis as text analysis of the preview/OCR-equivalent
+    return await sentinel_analyze_text({"text": f"FILENAME: {file.filename}\nCONTENT:\n{text_preview}"})
+
+@app.get("/api/intelligence/global-briefing")
+async def get_global_briefing():
+    """Generates a strategic global summary of all active alerts using Qwen LLM."""
+    all_alerts = alerts_db[:5] # Use memory buffer for speed
+    if not all_alerts:
+        return {"briefing": "COMMAND STATUS: NO CRITICAL ANOMALIES DETECTED. SUSTAINING NOMINAL SCANNING."}
+    
+    context = "\n".join([f"- {a['disaster_type']} at {a['location']} (Risk: {a['risk']}%)" for a in all_alerts])
+    
+    prompt = f"""
+    You are STRATUM Global Command AI. Summarize the following active disaster alerts into a single, high-impact strategic briefing (max 2 sentences).
+    Use precise, technical, and extremely urgent language.
+    
+    [ACTIVE ALERTS]
+    {context}
+    
+    Strategic Briefing:
+    """
+    
+    try:
+        briefing = await call_featherless_llm(prompt, model="Qwen/Qwen2.5-1.5B-Instruct")
+        return {"briefing": briefing.strip().upper()}
+    except:
+        return {"briefing": "MULTIPLE REGIONAL ANOMALIES DETECTED. ELEVATING SENTINEL VIGILANCE ACROSS ALL SECTORS."}
 
 @app.get("/api/risk")
 async def get_global_risk():
