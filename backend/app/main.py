@@ -32,6 +32,7 @@ from .agents.meta import ScribeAgent
 from contextlib import asynccontextmanager
 from .services.llm import call_featherless_llm
 from bson import ObjectId
+from twilio.rest import Client as TwilioClient
 
 INDIA_MONITOR_ZONES = [
     (19.0596, 72.8656),   # Mumbai
@@ -94,6 +95,61 @@ app = FastAPI(
     title="STRATUM — Autonomous Planetary Intelligence",
     lifespan=lifespan
 )
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from backend/ folder (one level above app/)
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+
+# Twilio Voice Call Config
+TWILIO_SID       = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_TOKEN     = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_FROM      = os.getenv("TWILIO_PHONE")
+ALERT_RECIPIENTS = [
+    n.strip() 
+    for n in os.getenv("ALERT_RECIPIENTS", "").split(",") 
+    if n.strip()
+]
+
+# Debug config loading
+if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM]):
+    print("❌ [DEBUG] Twilio configuration MISSING or INCOMPLETE in .env")
+else:
+    print(f"✅ [DEBUG] Twilio config loaded. SID: {TWILIO_SID[:6]}... | From: {TWILIO_FROM}")
+    print(f"✅ [DEBUG] Recipients: {ALERT_RECIPIENTS}")
+
+def send_call_alert(message: str):
+    """Internal helper to place a voice call to all configured recipients via TwiML."""
+    if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, ALERT_RECIPIENTS]):
+        logger.warning("[CALL] Twilio not configured. Skipping voice alert.")
+        return
+
+    # Sanitise message for TwiML — strip emojis/special chars that TTS can't pronounce well
+    safe_msg = message.replace("&", "and").replace("<", "").replace(">", "")
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">{safe_msg}</Say>
+</Response>"""
+
+    try:
+        print(f"🚀 [CALL] Attempting automated voice broadcast to {len(ALERT_RECIPIENTS)} numbers...")
+        client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+        for number in ALERT_RECIPIENTS:
+            try:
+                call = client.calls.create(
+                    twiml=twiml,
+                    from_=TWILIO_FROM,
+                    to=number
+                )
+                logger.info(f"[CALL] Voice alert placed to {number} | SID: {call.sid}")
+                print(f"✅ [CALL] Success for {number} | SID: {call.sid}")
+            except Exception as e:
+                logger.error(f"[CALL] Failed to call {number}: {e}")
+                print(f"❌ [CALL] Failed for {number}: {str(e)}")
+    except Exception as e:
+        logger.error(f"[CALL] Twilio client error: {e}")
+        print(f"❌ [CALL] Twilio Critical Client Error: {str(e)}")
 
 import json
 from fastapi.responses import StreamingResponse
@@ -390,6 +446,18 @@ def generate_alert(cell_id, risk, status, cause, location="Unknown Sector", trig
         if not already_exists:
             alerts_db.insert(0, alert)
             asyncio.create_task(save_alert(alert))
+            
+            # Auto-SMS dispatch for HIGH RISK (moved here from Turn 10 spec)
+            if risk >= 65:
+                emoji_map = {"EARTHQUAKE":"🌍","FLOOD":"🌊","CYCLONE":"🌪️","FIRE":"🔥","LANDSLIDE":"⛰️"}
+                emoji = emoji_map.get(str(trigger).upper(), "⚠️")
+                sms_msg = (
+                    f"{emoji} STRATUM EMERGENCY: {location}. "
+                    f"Risk level: {risk} percent. Threat type: {trigger}. "
+                    f"Action Required: {cause[:60]}. Please take immediate precautionary measures."
+                )
+                send_call_alert(sms_msg)
+
             return alert
     return None
 
@@ -1552,6 +1620,14 @@ async def citizen_submit(
             location=location,
             trigger=event_type
         )
+        
+        # Immediate voice call for high-credibility citizen report
+        call_msg = (
+            f"STRATUM Citizen Sentinel Alert for {location}. "
+            f"Event type: {event_type}. Credibility score: {score} out of 100. "
+            f"Verified ground truth report received. Please stay alert and take appropriate action."
+        )
+        send_call_alert(call_msg)
 
     submissions_db.insert(0, submission)
     _db = await get_db()
@@ -1634,6 +1710,149 @@ async def reject_submission(sub_id: str):
             ))
             return {"success": True}
     raise HTTPException(status_code=404, detail="Not found")
+
+
+# ── SMS ENDPOINTS ────────────────────────────────────────────────────────────
+
+@app.post("/api/alerts/{alert_id}/sms")
+async def send_alert_sms(alert_id: str):
+    """Admin manually triggers a voice call alert for a specific alert."""
+    target = None
+    for a in alerts_db:
+        if str(a.get("id")) == str(alert_id):
+            target = a
+            break
+
+    if not target:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, ALERT_RECIPIENTS]):
+        raise HTTPException(status_code=503, detail="Voice call service not configured")
+
+    disaster_type = target.get("disaster_type") or target.get("trigger", "UNKNOWN")
+    risk     = target.get("risk", 0)
+    location = target.get("location", "Unknown Location")
+    status   = target.get("status", "WARNING")
+    cause    = (target.get("cause") or target.get("message", ""))[:80]
+
+    # TTS-friendly message — no newlines, no emojis
+    speech_text = (
+        f"STRATUM Emergency Alert. Location: {location}. "
+        f"Threat type: {str(disaster_type).upper()}. Risk score: {risk:.0f} out of 100. "
+        f"Status: {status}. Detail: {cause}. "
+        f"Take immediate precautionary action. This is an automated message from the STRATUM Early Warning System."
+    )
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Response>'
+        f'<Say voice="alice">{speech_text}</Say>'
+        '</Response>'
+    )
+
+    sent_to = []
+    failed  = []
+    try:
+        twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+        print(f"🚀 [CALL] Manual alert voice broadcast starting for {len(ALERT_RECIPIENTS)} recipients...")
+        for number in ALERT_RECIPIENTS:
+            try:
+                call = twilio_client.calls.create(
+                    twiml=twiml,
+                    from_=TWILIO_FROM,
+                    to=number
+                )
+                sent_to.append(number)
+                logger.info(f"[CALL] Admin voice call placed to {number} | SID: {call.sid}")
+                print(f"✅ [CALL] Admin Success for {number} | SID: {call.sid}")
+            except Exception as e:
+                failed.append(number)
+                logger.error(f"[CALL] Failed to call {number}: {e}")
+                print(f"❌ [CALL] Admin Failed for {number}: {str(e)}")
+    except Exception as e:
+        print(f"❌ [CALL] Twilio Provider Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
+
+    target["sms_sent"]    = True
+    target["sms_sent_at"] = datetime.now().isoformat()
+
+    return {
+        "success":         True,
+        "sent_to":         sent_to,
+        "failed":          failed,
+        "message_preview": speech_text
+    }
+
+
+@app.post("/api/submissions/{sub_id}/sms")
+async def send_submission_sms(sub_id: str):
+    """Admin manually triggers a voice call alert for a citizen submission."""
+    target = None
+    for s in submissions_db:
+        if s.get("id") == sub_id:
+            target = s
+            break
+
+    if not target:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM, ALERT_RECIPIENTS]):
+        raise HTTPException(status_code=503, detail="Voice call service not configured")
+
+    event_type  = target.get("event_type", "UNKNOWN")
+    credibility = target.get("credibility", 0)
+    location    = target.get("location", "Unknown")
+    description = str(target.get("description", "No description"))[:80]
+    sub_id_short = sub_id[-8:] if len(sub_id) > 8 else sub_id
+    submitted_at = target.get("submitted_at", "unknown time")
+
+    # TTS-friendly message — no newlines, no emojis, speaks submission ID
+    speech_text = (
+        f"STRATUM Citizen Sentinel Alert. Submission ID: {sub_id_short}. "
+        f"Location: {location}. Event type: {event_type}. "
+        f"Credibility score: {credibility} out of 100. "
+        f"Report: {description}. "
+        f"Submitted at {submitted_at}. "
+        f"Admin action required. This is an automated message from the STRATUM Early Warning System."
+    )
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Response>'
+        f'<Say voice="alice">{speech_text}</Say>'
+        '</Response>'
+    )
+
+    sent_to = []
+    failed  = []
+    try:
+        twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+        print(f"🚀 [CALL] Manual submission voice broadcast starting for {len(ALERT_RECIPIENTS)} recipients...")
+        for number in ALERT_RECIPIENTS:
+            try:
+                call = twilio_client.calls.create(
+                    twiml=twiml,
+                    from_=TWILIO_FROM,
+                    to=number
+                )
+                sent_to.append(number)
+                logger.info(f"[CALL] Admin voice call placed to {number} | SID: {call.sid}")
+                print(f"✅ [CALL] Admin Success for {number} | SID: {call.sid}")
+            except Exception as e:
+                failed.append(number)
+                logger.error(f"[CALL] Failed to call {number}: {e}")
+                print(f"❌ [CALL] Admin Failed for {number}: {str(e)}")
+    except Exception as e:
+        print(f"❌ [CALL] Twilio Provider Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Twilio error: {str(e)}")
+
+    target["sms_sent"]    = True
+    target["sms_sent_at"] = datetime.now().isoformat()
+
+    return {
+        "success":         True,
+        "sent_to":         sent_to,
+        "failed":          failed,
+        "message_preview": speech_text
+    }
 
 
 if __name__ == "__main__":

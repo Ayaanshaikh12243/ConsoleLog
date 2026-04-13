@@ -24,7 +24,6 @@ const Sidebar = () => {
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
     { icon: FileText, label: 'Reports', path: '/reports' },
     { icon: Upload, label: 'Submissions', path: '/submissions' },
-    { icon: Database, label: 'History', path: '/history' },
     { icon: Settings, label: 'Settings', path: '/settings' },
   ];
 

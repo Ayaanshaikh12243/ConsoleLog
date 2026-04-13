@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield, Camera, MapPin, CheckCircle2, XCircle,
-  Clock, AlertTriangle, Zap, Loader2, Eye, TrendingUp
+  Clock, AlertTriangle, Zap, Loader2, Eye, TrendingUp, MessageSquare
 } from 'lucide-react';
 
 const API = 'http://localhost:8000';
@@ -34,10 +34,11 @@ function Badge({ label, style }) {
   );
 }
 
-function SubmissionCard({ sub, onApprove, onReject }) {
+function SubmissionCard({ sub, onApprove, onReject, onSendSMS, smsSending, smsSent }) {
   const tc = TYPE_COLORS[sub.event_type] || TYPE_COLORS.OTHER;
   const sc = STATUS_COLORS[sub.status]   || STATUS_COLORS.PENDING;
   const color = scoreColor(sub.credibility);
+  const isAutoAlerted = sub.status === 'AUTO_ALERTED';
 
   return (
     <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 18, padding: '16px 20px', marginBottom: 12, display: 'flex', gap: 16 }}>
@@ -62,12 +63,14 @@ function SubmissionCard({ sub, onApprove, onReject }) {
             style={{ background: tc.bg, borderColor: tc.border, color: tc.text }} />
 
           {sub.keras_prediction && (
-            <Badge label={`AI: ${sub.keras_prediction.toUpperCase()} ${(sub.keras_confidence * 100).toFixed(1)}%`}
+            <Badge label={`AI: ${sub.keras_prediction.toUpperCase()} ${(sub.keras_confidence).toFixed(1)}%`}
               style={{ background: 'rgba(0,242,255,0.1)', borderColor: '#00f2ff', color: '#00f2ff' }} />
           )}
 
-          <Badge label={sub.status.replace('_', ' ')}
-            style={{ background: sc.bg, borderColor: sc.text, color: sc.text }} />
+          <Badge
+            label={isAutoAlerted ? `📱 ${sub.status.replace('_', ' ')}` : sub.status.replace('_', ' ')}
+            style={{ background: sc.bg, borderColor: sc.text, color: sc.text }}
+          />
         </div>
 
         {sub.description && (
@@ -95,7 +98,7 @@ function SubmissionCard({ sub, onApprove, onReject }) {
       </div>
 
       {/* right: score + actions */}
-      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, minWidth: 70 }}>
+      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, minWidth: 80 }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 30, fontWeight: 900, color, lineHeight: 1 }}>{sub.credibility}</div>
           <div style={{ color: '#6b7280', fontSize: 10, letterSpacing: '0.1em', marginTop: 2 }}>SCORE</div>
@@ -113,6 +116,31 @@ function SubmissionCard({ sub, onApprove, onReject }) {
             </button>
           </>
         )}
+
+        {/* Send SMS button */}
+        <button
+          onClick={() => onSendSMS(sub.id)}
+          disabled={smsSending[sub.id] || smsSent[sub.id]}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid',
+            fontSize: 11, fontWeight: 700, cursor: smsSent[sub.id] ? 'default' : 'pointer',
+            background: smsSent[sub.id] ? 'rgba(34,197,94,0.12)' : 'rgba(0,242,255,0.08)',
+            borderColor: smsSent[sub.id] ? '#22c55e' : '#00f2ff',
+            color: smsSent[sub.id] ? '#22c55e' : '#00f2ff',
+            transition: 'all 0.2s',
+          }}
+        >
+          {smsSending[sub.id] ? (
+            <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+          ) : smsSent[sub.id] ? (
+            <CheckCircle2 size={11} />
+          ) : (
+            <MessageSquare size={11} />
+          )}
+          {smsSent[sub.id] ? 'Sent' : smsSending[sub.id] ? '…' : 'SMS'}
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </button>
       </div>
     </div>
   );
@@ -133,6 +161,22 @@ export default function AdminSubmissionsPage() {
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, []);
+
+  const [smsSending, setSmsSending] = useState({});
+  const [smsSent, setSmsSent]       = useState({});
+
+  const handleSendSMS = async (subId) => {
+    setSmsSending(prev => ({ ...prev, [subId]: true }));
+    try {
+      const res = await fetch(`${API}/api/submissions/${subId}/sms`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) setSmsSent(prev => ({ ...prev, [subId]: true }));
+    } catch (e) {
+      console.error('SMS failed', e);
+    } finally {
+      setSmsSending(prev => ({ ...prev, [subId]: false }));
+    }
+  };
 
   useEffect(() => {
     fetchSubs();
@@ -225,7 +269,15 @@ export default function AdminSubmissionsPage() {
         </div>
       ) : (
         filtered.map(sub => (
-          <SubmissionCard key={sub.id} sub={sub} onApprove={approve} onReject={reject} />
+          <SubmissionCard
+            key={sub.id}
+            sub={sub}
+            onApprove={approve}
+            onReject={reject}
+            onSendSMS={handleSendSMS}
+            smsSending={smsSending}
+            smsSent={smsSent}
+          />
         ))
       )}
     </div>

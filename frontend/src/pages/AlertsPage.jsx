@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, Clock, MapPin, ShieldAlert, Cpu,
   Trash2, Zap, ChevronDown, ChevronUp, FileText, Wrench,
-  Loader2, X, BrainCircuit, ExternalLink, Download
+  Loader2, X, BrainCircuit, ExternalLink, Download, MessageSquare, CheckCircle2
 } from 'lucide-react';
 
 const AlertsPage = () => {
@@ -18,6 +18,8 @@ const AlertsPage = () => {
   const [saving, setSaving] = useState(false);
   const [globalBriefing, setGlobalBriefing] = useState("");
   const [briefingLoading, setBriefingLoading] = useState(true);
+  const [smsSending, setSmsSending] = useState({});
+  const [smsSent, setSmsSent]       = useState({});
 
   const fetchGlobalBriefing = async () => {
     try {
@@ -81,6 +83,24 @@ const AlertsPage = () => {
     }
   };
 
+  const handleSendSMS = async (alertId) => {
+    setSmsSending(prev => ({ ...prev, [alertId]: true }));
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/alerts/${alertId}/sms`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setSmsSent(prev => ({ ...prev, [alertId]: true }));
+      }
+    } catch (e) {
+      console.error('SMS send failed', e);
+    } finally {
+      setSmsSending(prev => ({ ...prev, [alertId]: false }));
+    }
+  };
+
   const handleSaveToReports = async () => {
     if (!currentReport) return;
     setSaving(true);
@@ -137,6 +157,7 @@ const AlertsPage = () => {
   return (
     <div className="p-10 space-y-8">
       {/* ── Header ────────────────────────────────────────────── */}
+    
       <header className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center space-x-4">
           <div className="p-3 rounded-2xl bg-risk-high/10 text-risk-high">
@@ -169,31 +190,10 @@ const AlertsPage = () => {
             </div>
           </div>
         </div>
-
+              <div className="flex gap-5 items-center w-full flex-col">
         {/* Filter pills */}
-        <div className="flex gap-2 flex-wrap">
-          {['ALL', 'CRITICAL', 'WARNING'].map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border ${
-                filter === f
-                  ? f === 'CRITICAL' ? 'bg-risk-high/20   border-risk-high   text-risk-high'
-                  : f === 'WARNING'  ? 'bg-risk-medium/20 border-risk-medium text-risk-medium'
-                  :                   'bg-stratum-accent/20 border-stratum-accent text-stratum-accent'
-                  : 'bg-white/5 border-white/10 text-white/30 hover:text-white/60'
-              }`}
-            >
-              {f}
-              <span className="ml-1.5 opacity-50">
-                {f === 'ALL'      ? alerts.length
-                : f === 'CRITICAL' ? alerts.filter(a => a.risk > 70).length
-                : alerts.filter(a => a.risk > 35 && a.risk <= 70).length}
-              </span>
-            </button>
-          ))}
-        </div>
         {/* ── Global Sentiment Card ──────────────────────────────── */}
+        
         <div className="flex-1 min-w-[300px]">
            <div className="glass-panel p-5 rounded-3xl border border-stratum-accent/20 bg-stratum-accent/[0.05] relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -225,6 +225,29 @@ const AlertsPage = () => {
                 </div>
               </div>
            </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {['ALL', 'CRITICAL', 'WARNING'].map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border ${
+                filter === f
+                  ? f === 'CRITICAL' ? 'bg-risk-high/20   border-risk-high   text-risk-high'
+                  : f === 'WARNING'  ? 'bg-risk-medium/20 border-risk-medium text-risk-medium'
+                  :                   'bg-stratum-accent/20 border-stratum-accent text-stratum-accent'
+                  : 'bg-white/5 border-white/10 text-white/30 hover:text-white/60'
+              }`}
+            >
+              {f}
+              <span className="ml-1.5 opacity-50">
+                {f === 'ALL'      ? alerts.length
+                : f === 'CRITICAL' ? alerts.filter(a => a.risk > 70).length
+                : alerts.filter(a => a.risk > 35 && a.risk <= 70).length}
+              </span>
+            </button>
+          ))}
+        </div>
         </div>
       </header>
 
@@ -367,8 +390,8 @@ const AlertsPage = () => {
                         </span>
                       </div>
                       
-                      {/* NEW: AI Generation Button */}
-                      <div className="flex items-center gap-2 justify-end">
+                      {/* NEW: AI Generation Button + SMS Button */}
+                      <div className="flex items-center gap-2 justify-end flex-wrap">
                         <button
                           onClick={() => handleGenerateReport(alert.id)}
                           disabled={generatingReport === alert.id}
@@ -382,6 +405,37 @@ const AlertsPage = () => {
                           <span className="text-[8px] font-black uppercase tracking-widest">
                             GENERATE QWEN REPORT
                           </span>
+                        </button>
+
+                        <button
+                          onClick={() => handleSendSMS(alert.id)}
+                          disabled={smsSending[alert.id] || smsSent[alert.id]}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '6px 14px',
+                            borderRadius: 8,
+                            border: '1px solid',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: smsSent[alert.id] ? 'default' : 'pointer',
+                            background: smsSent[alert.id]
+                              ? 'rgba(34,197,94,0.15)'
+                              : 'rgba(0,242,255,0.08)',
+                            borderColor: smsSent[alert.id] ? '#22c55e' : '#00f2ff',
+                            color: smsSent[alert.id] ? '#22c55e' : '#00f2ff',
+                            transition: 'all 0.2s',
+                          }}
+                        >
+                          {smsSending[alert.id] ? (
+                            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                          ) : smsSent[alert.id] ? (
+                            <CheckCircle2 size={12} />
+                          ) : (
+                            <MessageSquare size={12} />
+                          )}
+                          {smsSent[alert.id] ? 'Call Alert Sent' : smsSending[alert.id] ? 'Sending…' : 'Call Alert SMS'}
                         </button>
                       </div>
                       <div className="flex items-center space-x-2 justify-end">

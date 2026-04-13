@@ -16,8 +16,9 @@ async def get_db():
     if _db is None:
         _client = motor.motor_asyncio.AsyncIOMotorClient(
             MONGO_URL,
-            serverSelectionTimeoutMS=5000,
-            connectTimeoutMS=5000
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000
         )
         _db = _client[DB_NAME]
         # Create indexes for fast lookups

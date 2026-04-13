@@ -1,9 +1,15 @@
 import httpx
 import json
 import os
+import google.generativeai as genai
 
-FEATHERLESS_API_KEY = "rc_b61bb884ceb020f86afed2793f0b404614f993d83b786bd27a5af6cc42c2ba87"
+FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY", "rc_b61bb884ceb020f86afed2793f0b404614f993d83b786bd27a5af6cc42c2ba87")
 FEATHERLESS_ENDPOINT = "https://api.featherless.ai/v1/chat/completions"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Configure Gemini as fallback
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 class IntelligenceService:
     @staticmethod
@@ -27,6 +33,16 @@ class IntelligenceService:
             f"STRICT RULE: Respond ONLY in English. Use 15 words maximum."
         )
 
+        # Try Gemini first (more reliable)
+        if GEMINI_API_KEY:
+            try:
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                print(f"Gemini Error: {e}")
+
+        # Fallback to Featherless
         headers = {
             "Authorization": f"Bearer {FEATHERLESS_API_KEY}",
             "Content-Type": "application/json"
@@ -44,8 +60,10 @@ class IntelligenceService:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(FEATHERLESS_ENDPOINT, headers=headers, json=payload, timeout=20.0)
-                if response.status_code == 200:
-                    return response.json()["choices"][0]["message"]["content"].strip()
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"].strip()
+            except httpx.HTTPStatusError as e:
+                print(f"Featherless API Error {e.response.status_code}: {e.response.text}")
             except Exception as e:
                 print(f"Explanation Error: {e}")
         
@@ -56,6 +74,16 @@ class IntelligenceService:
         """Analyzes field intelligence uploads."""
         prompt = f"Analyze field data: {content_preview}. Alert type: {filename}. Give a 1-sentence technical risk brief."
         
+        # Try Gemini first
+        if GEMINI_API_KEY:
+            try:
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                print(f"Gemini Error: {e}")
+        
+        # Fallback to Featherless
         headers = {
             "Authorization": f"Bearer {FEATHERLESS_API_KEY}",
             "Content-Type": "application/json"
@@ -72,8 +100,10 @@ class IntelligenceService:
         async with httpx.AsyncClient() as client:
             try:
                 res = await client.post(FEATHERLESS_ENDPOINT, headers=headers, json=payload, timeout=20.0)
-                if res.status_code == 200:
-                    return res.json()['choices'][0]['message']['content'].strip()
+                res.raise_for_status()
+                return res.json()['choices'][0]['message']['content'].strip()
+            except httpx.HTTPStatusError as e:
+                print(f"Featherless API Error {e.response.status_code}: {e.response.text}")
             except Exception as e:
                 print(f"Upload Analysis Error: {e}")
         
